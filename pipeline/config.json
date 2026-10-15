@@ -1,0 +1,29 @@
+{
+  "mvmi": {
+    "year": 2023,
+    "baseUrls": [
+      "https://www.nic.funet.fi/index/geodata/luke/vmi/2023",
+      "https://mirrors.nic.funet.fi/index/geodata/luke/vmi/2023"
+    ],
+    "ageFile": "ika_vmi1x_1923.tif",
+    "heightFile": "keskipituus_vmi1x_1923.tif",
+    "noDataCodes": [32766, 32767],
+    "pixelSizeM": 16
+  },
+  "protected": {
+    "sources": [
+      {
+        "label": "Valtion luonnonsuojelualue",
+        "url": "https://wwwd3.ymparisto.fi/d3/gis_data/spesific/luonnonsuojelualueet_valtio.zip"
+      },
+      {
+        "label": "Yksityinen luonnonsuojelualue",
+        "url": "https://wwwd3.ymparisto.fi/d3/gis_data/spesific/luonnonsuojelualueet_yksityinen.zip"
+      }
+    ],
+    "skipFilesContaining": ["eramaa", "erämaa"],
+    "skipTypesContaining": ["erämaa"],
+    "bufferM": 500,
+    "simplifyM": 1.0
+  }
+}

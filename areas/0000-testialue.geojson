@@ -1,0 +1,13 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "nimi": "Testialue (Evo, ei virallinen raja)" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[25.040, 61.215], [25.120, 61.205], [25.165, 61.230], [25.150, 61.262], [25.085, 61.270], [25.045, 61.250], [25.040, 61.215]]]
+      }
+    }
+  ]
+}
