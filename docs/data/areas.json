@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-15T17:11:54Z",
+ "generated": "2026-10-15T17:20:03Z",
  "encoding": 1,
  "mvmiYear": 2023,
  "attribution": [
@@ -7,6 +7,49 @@
   "Suojelualueet: Syke / Metsähallitus (CC BY 4.0)"
  ],
  "areas": [
+  {
+   "id": "jahti",
+   "name": "Jahti",
+   "areaHa": 2394,
+   "center": [
+    63.50493,
+    26.13771
+   ],
+   "version": "07daff243e98",
+   "bytes": 136226,
+   "forest": {
+    "width": 356,
+    "height": 508,
+    "res": 35.853,
+    "mercBounds": [
+     2902443.762,
+     9213683.205,
+     2915207.43,
+     9231896.529
+    ],
+    "bounds": [
+     [
+      63.458956,
+      26.073096
+     ],
+     [
+      63.531972,
+      26.187754
+     ]
+    ],
+    "checksum": {
+     "sumR": 5164054,
+     "sumG": 6198803
+    },
+    "file": "data/jahti/forest.png?v=07daff243e98"
+   },
+   "boundary": "data/jahti/boundary.geojson?v=07daff243e98",
+   "protected": "data/jahti/protected.geojson?v=07daff243e98",
+   "protectedCount": 2,
+   "built": "2026-10-15T17:20:03Z",
+   "srcHash": "01a35e6848ec",
+   "source": "areas/jahti.json"
+  },
   {
    "id": "0000-testialue",
    "name": "Testialue (Evo, ei virallinen raja)",
