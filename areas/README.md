@@ -5,7 +5,7 @@ Jokainen lupa-alue on tässä kansiossa yksi GeoJSON-tiedosto. Kun lisäät tai 
 ## Uuden alueen lisääminen
 
 1. Avaa alueen **PDF-kartta** eräluvat.fi:stä (alueen sivu → *Kartat ja esitteet*).
-2. Avaa tietokoneella [geojson.io](https://geojson.io). Valitse vasemmasta alakulmasta pohjakartaksi esim. *Satellite* tai *OSM*.
+2. Avaa [geojson.io](https://geojson.io) (tietokone tai tabletti). Vaihda pohjakartta yläpalkin oikeasta reunasta kerroskuvakkeesta (Export-painikkeen ja i-kuvakkeen välissä), esim. satelliittikuvaksi.
 3. Etsi alue ja piirrä raja **monikulmiotyökalulla** (Draw Polygon) PDF-kartan mukaan. Lopeta klikkaamalla ensimmäistä pistettä.
    - Jos alue on useammassa osassa, piirrä jokainen osa omaksi monikulmiokseen samaan tiedostoon.
    - Jos alueen sisällä on yksityinen palsta, piirrä se omaksi monikulmiokseen ja lisää sille ominaisuus `poista` arvolla `true`. Se leikataan alueesta pois.
