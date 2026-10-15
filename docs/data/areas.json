@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-15T16:43:34Z",
+ "generated": "2026-10-15T16:47:26Z",
  "encoding": 1,
  "mvmiYear": 2023,
  "attribution": [
@@ -15,8 +15,8 @@
     61.237182,
     25.100735
    ],
-   "version": "f2b65b9a3951",
-   "bytes": 278141,
+   "version": "77c3fa46a89a",
+   "bytes": 229685,
    "forest": {
     "width": 418,
     "height": 452,
@@ -38,16 +38,16 @@
      ]
     ],
     "checksum": {
-     "sumR": 7951748,
-     "sumG": 11767902
+     "sumR": 7899004,
+     "sumG": 11829982
     },
-    "file": "data/0000-testialue/forest.png?v=f2b65b9a3951"
+    "file": "data/0000-testialue/forest.png?v=77c3fa46a89a"
    },
-   "boundary": "data/0000-testialue/boundary.geojson?v=f2b65b9a3951",
-   "protected": "data/0000-testialue/protected.geojson?v=f2b65b9a3951",
+   "boundary": "data/0000-testialue/boundary.geojson?v=77c3fa46a89a",
+   "protected": "data/0000-testialue/protected.geojson?v=77c3fa46a89a",
    "protectedCount": 13,
-   "built": "2026-10-15T16:43:34Z",
-   "srcHash": "7b17bfd610ac",
+   "built": "2026-10-15T16:47:26Z",
+   "srcHash": "dfb3c148f4d8",
    "source": "areas/0000-testialue.geojson"
   }
  ]
