@@ -78,6 +78,31 @@ def classify(age: np.ndarray, height: np.ndarray, nodata_codes) -> tuple[np.ndar
     return r, g
 
 
+def smooth_median(a: np.ndarray, invalid: np.ndarray, k: int, chunk: int = 512) -> np.ndarray:
+    """k x k -mediaanisuodatus vain kelvollisista ruuduista (vähentää MVMI:n ruututason kohinaa).
+    Ei-kelvolliset ruudut (vesi, pelto, ei tietoa) säilyvät ennallaan eivätkä vaikuta naapureihin."""
+    if k is None or k <= 1:
+        return a
+    import warnings
+    from numpy.lib.stride_tricks import sliding_window_view
+    pad = k // 2
+    f = a.astype(np.float32)
+    f[invalid] = np.nan
+    fp = np.pad(f, pad, mode="constant", constant_values=np.nan)
+    out = a.astype(np.int32).copy()
+    h = a.shape[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        for r0 in range(0, h, chunk):
+            r1 = min(h, r0 + chunk)
+            win = sliding_window_view(fp[r0:r1 + 2 * pad], (k, k))
+            med = np.nanmedian(win.reshape(win.shape[0], win.shape[1], k * k), axis=-1)
+            block = np.rint(np.nan_to_num(med, nan=0)).astype(np.int32)
+            keep = ~invalid[r0:r1]
+            out[r0:r1][keep] = block[keep]
+    return out
+
+
 def merc_to_lonlat(x: float, y: float) -> tuple[float, float]:
     lon = math.degrees(x / EARTH_R)
     lat = math.degrees(2.0 * math.atan(math.exp(y / EARTH_R)) - math.pi / 2.0)
@@ -428,6 +453,11 @@ def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, heigh
     if t_a != t_h or age.shape != height.shape:
         raise RuntimeError("Iän ja pituuden rasterit eivät ole samassa ruudukossa")
 
+    k = int(mv.get("smoothWindow", 1))
+    if k > 1:
+        bad = np.isin(age, nod) | np.isin(height, nod) | (age < 0) | (height < 0)
+        age = smooth_median(age, bad, k)
+        height = smooth_median(height, bad, k)
     r, g = classify(age, height, nod)
     inside = geometry_mask([mapping(poly)], out_shape=r.shape, transform=t_a, invert=True, all_touched=False)
     r[~inside] = 0

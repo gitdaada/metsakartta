@@ -8,7 +8,8 @@
     "ageFile": "ika_vmi1x_1923.tif",
     "heightFile": "keskipituus_vmi1x_1923.tif",
     "noDataCodes": [32766, 32767],
-    "pixelSizeM": 16
+    "pixelSizeM": 16,
+    "smoothWindow": 3
   },
   "protected": {
     "sources": [

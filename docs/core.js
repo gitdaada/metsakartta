@@ -126,7 +126,8 @@
 
   /**
    * Piirtää yhden 256 px karttatiilen out-taulukkoon (Uint32Array, 65536).
-   * opts: {palette, taimikkoCode, hatchPeriod, hatchWidth, hatchColor}
+   * opts: {palette, taimikkoCode, treelessCode, hatchPeriod, hatchWidth, hatchColor}
+   * treelessCode: nuoret (alle 20 v) ruudut, joiden pituuskoodi on tätä pienempi, näytetään puuttomina.
    * Palauttaa true, jos tiileen piirtyi jotain.
    */
   function renderTile(F, x, y, z, out, opts, size) {
@@ -141,7 +142,7 @@
       var sx = Math.floor((tx0 + (px + 0.5) * res - F.mx0) / F.rx);
       cols[px] = (sx >= 0 && sx < F.w) ? sx : -1;
     }
-    var pal = opts.palette, tcode = opts.taimikkoCode, per = opts.hatchPeriod || 9,
+    var pal = opts.palette, tcode = opts.taimikkoCode, lcode = opts.treelessCode || 0, per = opts.hatchPeriod || 9,
         hw = opts.hatchWidth || 2, hcol = opts.hatchColor, code = F.code, ht = F.ht;
     var gx0 = x * S, any = false;
     for (var py = 0; py < S; py++) {
@@ -153,6 +154,7 @@
         if (c0 < 0) continue;
         var i = base + c0, c = code[i];
         if (c === 0) continue;
+        if (c >= 2 && c < 22 && ht[i] < lcode) c = 1;
         var col = pal[c];
         if (c >= 2 && tcode > 0 && ht[i] < tcode && ((gx0 + px + gy) % per) < hw) col = hcol;
         out[row + px] = col;
@@ -163,10 +165,14 @@
   }
 
   /** Kuvaus napautetusta ruudusta. */
-  function describe(c, h, oldAge, taimikkoM) {
+  function describe(c, h, oldAge, taimikkoM, treelessM) {
     if (!c) return null;
     if (c === 1) return { kind: 'treeless', title: 'Puuton', detail: 'Aukea, hakkuuaukko tai avosuo' };
     var age = c - 2, heightM = h * 0.2;
+    if (age < 20 && h < Math.round((treelessM || 0) * 5)) {
+      return { kind: 'treeless', title: 'Puuton / uudistusala', age: age, heightM: heightM,
+        detail: 'Taimet alle ' + String(treelessM).replace('.', ',') + ' m' + (age > 0 ? ' · ikä n. ' + age + ' v' : '') };
+    }
     var taimikko = heightM < taimikkoM;
     var kind = age >= oldAge ? 'old' : 'forest';
     var title = (taimikko ? 'Taimikko' : (kind === 'old' ? 'Vanha metsä' : (age < oldAge / 2 ? 'Nuori metsä' : 'Keski-ikäinen metsä')));
@@ -175,13 +181,13 @@
   }
 
   /** Osuusluvut metsäalasta. */
-  function stats(F, oldAge, taimikkoCode) {
+  function stats(F, oldAge, taimikkoCode, treelessCode) {
     var t = 0, young = 0, old = 0, taim = 0, total = 0, code = F.code, ht = F.ht;
     for (var i = 0, n = code.length; i < n; i++) {
       var c = code[i];
       if (!c) continue;
       total++;
-      if (c === 1) { t++; continue; }
+      if (c === 1 || (c < 22 && ht[i] < (treelessCode || 0))) { t++; continue; }
       if (c - 2 >= oldAge) old++; else young++;
       if (ht[i] < taimikkoCode) taim++;
     }

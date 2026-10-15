@@ -70,9 +70,25 @@ def test_names():
     print("names ok")
 
 
+def test_smooth():
+    a = np.full((6, 7), 50, np.int32)
+    a[2, 3] = 140                       # yksittäinen kohinaruutu
+    a[0, 0] = 32767                     # vesi
+    inv = a == 32767
+    out = build.smooth_median(a, inv, 3, chunk=2)
+    assert out[2, 3] == 50, out
+    assert out[0, 0] == 32767 and out[0, 1] == 50
+    b = np.zeros((5, 5), np.int32); b[:, 3:] = 100     # reuna säilyy
+    ob = build.smooth_median(b, np.zeros_like(b, bool), 3)
+    assert (ob[:, :2] == 0).all() and (ob[:, 4] == 100).all()
+    assert (build.smooth_median(a, inv, 1) == a).all()
+    print("smooth ok")
+
+
 if __name__ == "__main__":
     test_classify()
     test_png_roundtrip()
     test_crop()
     test_names()
+    test_smooth()
     print("KAIKKI OK")

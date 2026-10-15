@@ -28,7 +28,7 @@
   };
 
   var DEFAULTS = {
-    apiKey: '', basemap: 'maastokartta', oldAge: 80, taimikkoM: 7, maxZoom: 16, offlineOrtho: false,
+    apiKey: '', basemap: 'maastokartta', oldAge: 80, taimikkoM: 7, treelessM: 0.5, maxZoom: 16, offlineOrtho: false,
     wakeLock: false, opacity: 0.7, showForest: true, showProtected: true, showMask: true, gpsOn: false,
     mmlBase: ''
   };
@@ -169,6 +169,7 @@
       S.renderOpts = {
         palette: MK.buildPalette(settings.oldAge),
         taimikkoCode: Math.round(settings.taimikkoM * 5),
+        treelessCode: Math.round(settings.treelessM * 5),
         hatchPeriod: 9, hatchWidth: 2,
         hatchColor: MK.packRGBA(hc[0], hc[1], hc[2], 255)
       };
@@ -177,7 +178,7 @@
   }
   function refreshForest() {
     S.renderOpts = null;
-    if (S.forest) S.stats = MK.stats(S.forest, settings.oldAge, Math.round(settings.taimikkoM * 5));
+    if (S.forest) S.stats = MK.stats(S.forest, settings.oldAge, Math.round(settings.taimikkoM * 5), Math.round(settings.treelessM * 5));
     forestLayer.redraw();
     renderLegend();
   }
@@ -225,7 +226,7 @@
       '<span>Selite</span></button>';
     if (legendOpen) {
       html += '<ul class="legend-list">' +
-        '<li><span class="sw" style="background:' + MK.cssRGB(C.treeless) + '"></span>Puuton</li>' +
+        '<li><span class="sw" style="background:' + MK.cssRGB(C.treeless) + '"></span><span>Puuton' + (settings.treelessM > 0 ? '<small>tai taimet alle ' + String(settings.treelessM).replace('.', ',') + ' m</small>' : '') + '</span></li>' +
         '<li><span class="sw" style="background:' + grad + '"></span><span>Metsä 0–' + (oa - 1) + ' v<small>vihreämpi = nuorempi</small></span></li>' +
         '<li><span class="sw" style="background:' + MK.cssRGB(C.old) + '"></span>Vanha metsä ≥ ' + oa + ' v</li>' +
         '<li><span class="sw" style="background:' + hatch + '"></span>Taimikko (alle ' + String(settings.taimikkoM).replace('.', ',') + ' m)</li>' +
@@ -398,7 +399,7 @@
     if (S.forest) {
       var m = MK.lonLatToMerc(ll.lng, ll.lat);
       var i = MK.sampleIndex(S.forest, m[0], m[1]);
-      if (i >= 0) info = MK.describe(S.forest.code[i], S.forest.ht[i], settings.oldAge, settings.taimikkoM);
+      if (i >= 0) info = MK.describe(S.forest.code[i], S.forest.ht[i], settings.oldAge, settings.taimikkoM, settings.treelessM);
     }
     var prots = [];
     if (S.protectedGJ) (S.protectedGJ.features || []).forEach(function (f) {
@@ -855,6 +856,7 @@
 
     body.appendChild(h('h3', { text: 'Värit' }));
     body.appendChild(numberField('oldAge', 'Vanhan metsän raja (v)', settings.oldAge, 20, 250, 5, 'Vähintään tämän ikäinen metsä näkyy sinisenä.', function (v) { settings.oldAge = v; }));
+    body.appendChild(numberField('treelessM', 'Puuttoman raja (m)', settings.treelessM, 0, 3, 0.1, 'Uudistusala, jonka taimet ovat tätä matalampia, näkyy punaisena aukkona. 0 = vain täysin puuton.', function (v) { settings.treelessM = v; }));
     body.appendChild(numberField('taimikkoM', 'Taimikon pituusraja (m)', settings.taimikkoM, 1, 15, 0.5, 'Tätä matalampi metsä merkitään vinoviivoin.', function (v) { settings.taimikkoM = v; }));
 
     body.appendChild(h('h3', { text: 'Offline-tallennus' }));
