@@ -29,6 +29,9 @@ jobs:
     steps:
       - name: Hae koodi
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Uusin main (ei tapahtuman commit), jotta peräkkäiset ajot jatkavat edellisen tuloksista.
+          ref: main
 
       - name: Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -66,8 +69,12 @@ jobs:
             exit 0
           fi
           git commit -m "Päivitä metsäkartat"
-          git pull --rebase
-          git push
+          for i in 1 2 3; do
+            git pull --rebase -X theirs origin main && git push && exit 0
+            echo "Push epäonnistui, yritetään uudelleen ($i/3)"
+            sleep 10
+          done
+          exit 1
 
       - name: Ilmoita virheestä
         if: steps.build.outcome == 'failure'

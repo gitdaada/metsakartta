@@ -606,7 +606,15 @@ def main() -> int:
         "attribution": [FOREST_ATTRIBUTION.format(year=cfg["mvmi"]["year"]), PROTECTED_ATTRIBUTION],
         "areas": result,
     }
-    index_path.write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
+    # Jos mikään ei muuttunut, ei kosketa tiedostoon (vältetään turhat commitit ja ristiriidat).
+    try:
+        prev = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else None
+    except Exception:  # noqa: BLE001
+        prev = None
+    if prev and {k: v for k, v in prev.items() if k != "generated"} == {k: v for k, v in index.items() if k != "generated"}:
+        log("areas.json ennallaan.")
+    else:
+        index_path.write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
     log(f"Valmis: {len(result)} aluetta, {len(failed)} epäonnistui.")
     if failed:
         log("Epäonnistuneet: " + ", ".join(failed))
