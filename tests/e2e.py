@@ -78,9 +78,10 @@ def main():
         page = ctx.new_page()
         page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}") if m.type in ("error", "warning") else None)
         page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+        page.on("dialog", lambda d: (errors.append(f"pageerror: XSS dialog {d.message}"), d.dismiss()))
 
         page.goto("http://127.0.0.1:8000/")
-        page.wait_for_function("window.__mk && window.__mk.S.forest", timeout=15000)
+        page.wait_for_function("() => window.__mk && window.__mk.S.forest", timeout=15000)
         page.evaluate("navigator.serviceWorker.ready")
         page.wait_for_timeout(1500)
         page.screenshot(path=str(SHOTS / "01-kartta.png"))
@@ -120,7 +121,9 @@ def main():
         page.wait_for_selector("#infoCard:not([hidden])")
         info2 = page.inner_text("#infoCard")
         print("INFO2:", info2.replace("\n", " | "))
-        assert "Suojelualue" in info2, info2
+        assert "Suojelualue" in info2 and "<img src=x" in info2, info2
+        assert page.evaluate("document.querySelectorAll('#infoCard img, #infoCard script').length") == 0
+        assert "<script>" in page.inner_text("#areaName")
         page.screenshot(path=str(SHOTS / "03-suojelualue.png"))
         page.click(".info-close")
 
@@ -138,7 +141,7 @@ def main():
         page.screenshot(path=str(SHOTS / "05-alueet.png"))
         n_before = len(TILE_REQUESTS)
         page.click("text=Tallenna offline")
-        page.wait_for_function("window.__mk.offline()['9999-testialue'] && !window.__mk.S.dl", timeout=60000)
+        page.wait_for_function("() => window.__mk.offline()['9999-testialue'] && !window.__mk.S.dl", timeout=60000)
         page.wait_for_timeout(500)
         rec = page.evaluate("window.__mk.offline()['9999-testialue']")
         print("TALLENNETTU:", json.dumps(rec), "tiilipyyntöjä", len(TILE_REQUESTS) - n_before)
@@ -150,7 +153,7 @@ def main():
         ctx.set_offline(True)
         page.evaluate("window.__mk.map.setView([61.25, 25.13], 15)")
         page.reload()
-        page.wait_for_function("window.__mk && window.__mk.S.forest", timeout=15000)
+        page.wait_for_function("() => window.__mk && window.__mk.S.forest", timeout=15000)
         page.evaluate("window.__mk.map.setView([61.229, 25.08], 15)")
         page.wait_for_timeout(2500)
         tiles = page.evaluate("""() => {

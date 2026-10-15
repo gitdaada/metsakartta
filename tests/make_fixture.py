@@ -27,6 +27,11 @@ def main(dest: Path):
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(ROOT / "docs", dest)
+    idx_html = dest / "index.html"
+    h = idx_html.read_text(encoding="utf-8")
+    assert "https://avoin-karttakuva.maanmittauslaitos.fi" in h
+    idx_html.write_text(h.replace("https://avoin-karttakuva.maanmittauslaitos.fi",
+                                  "https://avoin-karttakuva.maanmittauslaitos.fi http://127.0.0.1:8001"), encoding="utf-8")
     data = dest / "data"
     if data.exists():
         shutil.rmtree(data)
@@ -87,14 +92,14 @@ def main(dest: Path):
     boundary = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"nimi": "Testialue"},
                 "geometry": {"type": "Polygon", "coordinates": [ring, hole]}}]}
     protected = {"type": "FeatureCollection", "features": [{"type": "Feature",
-                 "properties": {"nimi": "Testin aarnialue", "tyyppi": "Vanhojen metsien suojelualue", "lahde": "Valtion luonnonsuojelualue"},
+                 "properties": {"nimi": "Testin aarnialue <img src=x onerror=alert(1)>", "tyyppi": "Vanhojen metsien suojelualue", "lahde": "Valtion luonnonsuojelualue"},
                  "geometry": {"type": "Polygon", "coordinates": [prot]}}]}
     (out / "boundary.geojson").write_text(json.dumps(boundary))
     (out / "protected.geojson").write_text(json.dumps(protected))
     files = [(out / f).read_bytes() for f in ("forest.png", "boundary.geojson", "protected.geojson")]
     ver = build.sha1_bytes(*files)[:12]
     entry = {
-        "id": aid, "name": "9999 Testialue", "areaHa": 1450, "center": [61.238, 25.1], "version": ver,
+        "id": aid, "name": "9999 Testialue<script>alert(2)</script>", "areaHa": 1450, "center": [61.238, 25.1], "version": ver,
         "bytes": sum(len(b) for b in files),
         "forest": dict(meta, file=f"data/{aid}/forest.png?v={ver}"),
         "boundary": f"data/{aid}/boundary.geojson?v={ver}",

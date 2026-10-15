@@ -41,7 +41,8 @@ jobs:
           cache-dependency-path: pipeline/requirements.txt
 
       - name: Asenna kirjastot
-        run: pip install -r pipeline/requirements.txt
+        # Vain valmiit paketit (wheel): asennus ei aja pakettien omaa asennuskoodia.
+        run: pip install --only-binary=:all: -r pipeline/requirements.txt
 
       - name: Lähdeaineistojen välimuisti
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

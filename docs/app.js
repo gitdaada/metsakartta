@@ -32,7 +32,21 @@
     wakeLock: false, opacity: 0.7, showForest: true, showProtected: true, showMask: true, gpsOn: false,
     mmlBase: ''
   };
-  var settings = Object.assign({}, DEFAULTS, store.get('settings', {}));
+  function num(v, d, min, max) { v = Number(v); return isFinite(v) ? Math.max(min, Math.min(max, v)) : d; }
+  function sanitizeSettings(raw) {
+    var s = Object.assign({}, DEFAULTS, raw && typeof raw === 'object' ? raw : {});
+    s.apiKey = typeof s.apiKey === 'string' ? s.apiKey.replace(/[^A-Za-z0-9._~-]/g, '') : '';
+    s.basemap = ['maastokartta', 'ortokuva', 'osm'].indexOf(s.basemap) >= 0 ? s.basemap : DEFAULTS.basemap;
+    s.oldAge = Math.round(num(s.oldAge, DEFAULTS.oldAge, 20, 250));
+    s.taimikkoM = num(s.taimikkoM, DEFAULTS.taimikkoM, 1, 15);
+    s.treelessM = num(s.treelessM, DEFAULTS.treelessM, 0, 3);
+    s.maxZoom = s.maxZoom === 15 ? 15 : 16;
+    s.opacity = num(s.opacity, DEFAULTS.opacity, 0.2, 1);
+    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn'].forEach(function (k) { s[k] = !!s[k]; });
+    s.mmlBase = typeof s.mmlBase === 'string' ? s.mmlBase : '';
+    return s;
+  }
+  var settings = sanitizeSettings(store.get('settings', {}));
   function saveSettings() { store.set('settings', settings); }
 
   var offline = store.get('offline', {}); // { areaId: {version, date, maxZoom, layers, tiles, failed} }
@@ -119,7 +133,12 @@
   });
   map.on('dragstart', function () { if (S.follow) setFollow(false); });
 
-  function mmlBase() { return (settings.mmlBase || MML_BASE).replace(/\/$/, ''); }
+  // Testikäyttöön: vaihtoehtoinen karttapalvelin hyväksytään vain, kun sovellus itse ajetaan paikallisesti.
+  function mmlBase() {
+    var local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+    if (local && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(settings.mmlBase)) return settings.mmlBase.replace(/\/$/, '');
+    return MML_BASE;
+  }
   function mmlTemplate(layer) {
     var L_ = MML_LAYERS[layer];
     return mmlBase() + '/' + L_.path + '/default/WGS84_Pseudo-Mercator/{z}/{y}/{x}.' + L_.ext;
@@ -846,7 +865,7 @@
     var show = h('button', { type: 'button', class: 'btn', text: 'Näytä', onclick: function () {
       keyInput.type = keyInput.type === 'password' ? 'text' : 'password'; show.textContent = keyInput.type === 'password' ? 'Näytä' : 'Piilota'; } });
     keyInput.addEventListener('change', function () {
-      settings.apiKey = keyInput.value.trim(); if (settings.apiKey && settings.basemap === 'osm') settings.basemap = 'maastokartta';
+      settings.apiKey = keyInput.value.trim().replace(/[^A-Za-z0-9._~-]/g, ''); keyInput.value = settings.apiKey; if (settings.apiKey && settings.basemap === 'osm') settings.basemap = 'maastokartta';
       saveSettings(); setBasemap(); toast('API-avain tallennettu tähän laitteeseen.');
     });
     body.appendChild(h('div', { class: 'field' },
@@ -943,7 +962,7 @@
   loadIndex().then(function () {
     var last = store.get('lastArea', null);
     if (S.index && S.index.attribution) {
-      forestLayer.options.attribution = S.index.attribution.join(' · ');
+      forestLayer.options.attribution = S.index.attribution.map(esc).join(' · ');
     }
     if (last && findArea(last)) selectArea(last, { keepView: true });
     else if (S.areas.length === 1) selectArea(S.areas[0].id);
