@@ -98,12 +98,16 @@ button { cursor: pointer; }
   box-shadow: var(--shadow); margin-left: calc(12px + var(--safe-l)) !important; margin-bottom: 6px !important;
   max-width: min(240px, calc(100vw - 100px));
 }
-.legend-toggle {
-  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 12px; width: 100%;
-  background: none; border: 0; text-align: left; font-weight: 700; font-size: 13px;
+.legend.legend-closed { background: none; border: 0; box-shadow: none; }
+.legend-fab {
+  width: 52px; height: 52px; display: grid; place-items: center; border-radius: 50%;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); box-shadow: var(--shadow);
 }
-.legend-dots { display: inline-flex; gap: 3px; }
-.legend-dots i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.legend-fab svg { width: 26px; height: 26px; }
+.legend-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 0 12px; font-weight: 700; font-size: 13px; }
+.legend-close { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: none; color: var(--muted); }
+.legend-close svg { width: 20px; height: 20px; }
+.wind-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
 .legend-list { list-style: none; margin: 0; padding: 0 12px 10px; font-size: 12.5px; line-height: 1.25; display: grid; gap: 5px; }
 .legend-list li { display: flex; align-items: center; gap: 8px; }
 .legend-list small { display: block; color: var(--muted); font-size: 11px; }

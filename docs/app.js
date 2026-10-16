@@ -157,7 +157,7 @@
     if (key && MML_LAYERS[layer]) {
       S.base = L.tileLayer(mmlTemplate(layer) + '?api-key=' + encodeURIComponent(key), {
         maxNativeZoom: 16, maxZoom: 18, keepBuffer: 3,
-        attribution: '© <a href="https://www.maanmittauslaitos.fi" target="_blank" rel="noopener">Maanmittauslaitos</a>'
+        attribution: '© <a href="https://www.maanmittauslaitos.fi" target="_blank" rel="noopener">MML</a>'
       });
     } else {
       S.base = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -222,7 +222,7 @@
   // Selite
   // ---------------------------------------------------------------------------
 
-  var legendOpen = store.get('legendOpen', true);
+  var legendOpen = false; // selite on oletuksena piilossa; avataan painikkeesta
   var LegendControl = L.Control.extend({
     options: { position: 'bottomleft' },
     onAdd: function () {
@@ -242,11 +242,20 @@
     var C = MK.COLORS, oa = settings.oldAge;
     var grad = 'linear-gradient(90deg,' + MK.cssRGB(C.young) + ',' + MK.cssRGB(C.middle) + ')';
     var hatch = 'repeating-linear-gradient(135deg,' + MK.cssRGB(C.hatch) + ' 0 2px,' + MK.cssRGB(MK.ageColor(5, oa)) + ' 2px 7px)';
-    var html = '<button type="button" class="legend-toggle" aria-expanded="' + legendOpen + '">' +
-      '<span class="legend-dots"><i style="background:' + MK.cssRGB(C.treeless) + '"></i><i style="background:' + MK.cssRGB(C.young) +
-      '"></i><i style="background:' + MK.cssRGB(C.middle) + '"></i><i style="background:' + MK.cssRGB(C.old) + '"></i></span>' +
-      '<span>Selite</span></button>';
-    if (legendOpen) {
+    div.classList.toggle('legend-closed', !legendOpen);
+    if (!legendOpen) {
+      div.innerHTML = '<button type="button" class="legend-fab" aria-label="Näytä selite" aria-expanded="false">' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+        '<rect x="2.5" y="3.5" width="6" height="4.5" rx="1" fill="' + MK.cssRGB(C.treeless) + '"/>' +
+        '<rect x="2.5" y="9.75" width="6" height="4.5" rx="1" fill="' + MK.cssRGB(C.young) + '"/>' +
+        '<rect x="2.5" y="16" width="6" height="4.5" rx="1" fill="' + MK.cssRGB(C.old) + '"/>' +
+        '<path d="M11.5 5.75h10M11.5 12h10M11.5 18.25h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
+      div.querySelector('.legend-fab').addEventListener('click', function () { legendOpen = true; renderLegend(); });
+      return;
+    }
+    var html = '<div class="legend-head"><span>Selite</span><button type="button" class="legend-close" aria-label="Piilota selite" aria-expanded="true">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button></div>';
+    {
       html += '<ul class="legend-list">' +
         '<li><span class="sw" style="background:' + MK.cssRGB(C.treeless) + '"></span><span>Puuton' + (settings.treelessM > 0 ? '<small>tai taimet alle ' + String(settings.treelessM).replace('.', ',') + ' m</small>' : '') + '</span></li>' +
         '<li><span class="sw" style="background:' + grad + '"></span><span>Metsä 0–' + (oa - 1) + ' v<small>vihreämpi = nuorempi</small></span></li>' +
@@ -263,9 +272,7 @@
       }
     }
     div.innerHTML = html;
-    div.querySelector('.legend-toggle').addEventListener('click', function () {
-      legendOpen = !legendOpen; store.set('legendOpen', legendOpen); renderLegend();
-    });
+    div.querySelector('.legend-close').addEventListener('click', function () { legendOpen = false; renderLegend(); });
   }
 
   // ---------------------------------------------------------------------------
@@ -952,7 +959,6 @@
   var FMI_WFS = 'https://opendata.fmi.fi/wfs';
   var OPEN_METEO = 'https://api.open-meteo.com/v1/forecast';
   var WIND_MAX_AGE = 60 * 60 * 1000;
-  var WIND_COLOR = '#c43cff';
   var windManual = (function (m) {
     return m && isFinite(Number(m.dir)) ? { dir: MK.norm360(Math.round(Number(m.dir))), at: Number(m.at) || Date.now() } : null;
   })(store.get('windManual', null));
@@ -1046,20 +1052,176 @@
     return e ? { dir: e.dir, spd: e.spd, gust: e.gust, t: e.t, manual: false } : null;
   }
 
+  // Viuhka piirretään omalle canvas-pinnalleen: liukuväri, elävät reunat ja myötätuuleen kulkevat hajuhiukkaset.
+  var REDUCED_MOTION = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var FAN_RGB = '196,60,255';
+
+  var WindFanLayer = L.Layer.extend({
+    initialize: function () { this._fan = null; this._raf = 0; this._parts = []; this._last = 0; this._prev = 0; },
+    setFan: function (fan) {
+      var reseed = !this._fan || this._fan.bearing !== fan.bearing;
+      this._fan = fan;
+      if (reseed) this._seed();
+      this._draw();
+      return this;
+    },
+    onAdd: function (map) {
+      var c = this._canvas = L.DomUtil.create('canvas', 'wind-canvas');
+      c.setAttribute('aria-hidden', 'true');
+      map.getPane('windPane').appendChild(c);
+      map.on('zoomstart', this._hide, this);
+      map.on('zoomend moveend resize viewreset', this._show, this);
+      map.on('move', this._draw, this);
+      this._loopFn = this._loop.bind(this);
+      this._show();
+      if (!REDUCED_MOTION) this._raf = requestAnimationFrame(this._loopFn);
+    },
+    onRemove: function (map) {
+      if (this._raf) cancelAnimationFrame(this._raf);
+      this._raf = 0;
+      map.off('zoomstart', this._hide, this);
+      map.off('zoomend moveend resize viewreset', this._show, this);
+      map.off('move', this._draw, this);
+      L.DomUtil.remove(this._canvas);
+      this._canvas = null;
+    },
+    _hide: function () { this._hidden = true; if (this._canvas) this._canvas.style.visibility = 'hidden'; },
+    _show: function () { this._hidden = false; if (this._canvas) this._canvas.style.visibility = ''; this._draw(); },
+    _seed: function () {
+      this._parts = [];
+      for (var i = 0; i < 26; i++) this._parts.push(this._newPart(Math.random()));
+    },
+    _newPart: function (s) {
+      return { s: s, u: (Math.random() * 2 - 1) * 0.85, k: 0.7 + Math.random() * 0.6, ph: Math.random() * 6.283, sz: 0.7 + Math.random() * 0.6 };
+    },
+    _loop: function (now) {
+      this._raf = requestAnimationFrame(this._loopFn);
+      if (now - this._last < 33) return; // n. 30 kuvaa sekunnissa riittää ja säästää akkua
+      var dt = this._prev ? Math.min(0.1, (now - this._prev) / 1000) : 0;
+      this._prev = now; this._last = now;
+      var f = this._fan;
+      if (f && dt) {
+        // Kierroksen kesto 7 s (tyyni) ... 2,5 s (kova tuuli)
+        var rate = 1 / Math.max(2.5, 7 - (f.spd === null ? 3 : f.spd) * 0.8);
+        for (var i = 0; i < this._parts.length; i++) {
+          var p = this._parts[i];
+          p.s += dt * rate * p.k;
+          if (p.s > 1) this._parts[i] = this._newPart(0);
+        }
+      }
+      this._draw(now);
+    },
+    _draw: function (now) {
+      var map = this._map, c = this._canvas, f = this._fan;
+      if (!map || !c || this._hidden) return;
+      var size = map.getSize(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (c.width !== Math.round(size.x * dpr) || c.height !== Math.round(size.y * dpr)) {
+        c.width = Math.round(size.x * dpr); c.height = Math.round(size.y * dpr);
+        c.style.width = size.x + 'px'; c.style.height = size.y + 'px';
+      }
+      L.DomUtil.setPosition(c, map.containerPointToLayerPoint([0, 0]));
+      var ctx = c.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, size.x, size.y);
+      if (!f) return;
+      var o = map.latLngToContainerPoint([f.lat, f.lon]);
+      var e = map.latLngToContainerPoint(MK.destPoint(f.lat, f.lon, f.bearing, f.len));
+      var dx = e.x - o.x, dy = e.y - o.y, Lpx = Math.sqrt(dx * dx + dy * dy);
+      if (Lpx < 6) return;
+      var a = Math.atan2(dy, dx), h = f.half * Math.PI / 180;
+      // Kartan tapahtumat kutsuvat tätä tapahtumaoliolla, joten aika luetaan vain numerosta.
+      var t = REDUCED_MOTION ? 0 : (typeof now === 'number' ? now : performance.now()) / 1000;
+      var cosA = Math.cos(a), sinA = Math.sin(a);
+
+      // Rungon muoto: alkaa pyöreänä sijaintisi ympäriltä, levenee myötätuuleen ja päättyy pyöristettyyn,
+      // hitaasti aaltoilevaan päähän. Paikalliset koordinaatit: x tuulen suuntaan, y sivulle.
+      var w0 = 7, tanH = Math.tan(h), xEnd = Lpx * 0.9;
+      function L2S(x, y) { return [o.x + x * cosA - y * sinA, o.y + x * sinA + y * cosA]; }
+      function shape(scale) {
+        var pts = [], n = 22, i, s, x, wob, b;
+        var W = function (xx) { return (w0 + tanH * xx) * scale; };
+        for (i = 0; i <= n; i++) {          // vasen reuna
+          s = i / n; x = s * xEnd;
+          wob = 1 + 0.13 * Math.sin(5.2 * s + t * 0.9) + 0.07 * Math.sin(11 * s - t * 1.3);
+          pts.push(L2S(x, -W(x) * wob));
+        }
+        var We = W(xEnd);
+        for (i = 1; i < n; i++) {           // pyöristetty, aaltoileva kaukopää
+          b = -Math.PI / 2 + Math.PI * i / n;
+          wob = 1 + 0.12 * Math.sin(3 * b + t * 0.8) + 0.06 * Math.sin(7 * b - t * 1.2);
+          pts.push(L2S(xEnd + We * 0.6 * Math.cos(b) * wob, We * Math.sin(b) * (1 + 0.05 * Math.sin(5 * b + t))));
+        }
+        for (i = n; i >= 0; i--) {          // oikea reuna
+          s = i / n; x = s * xEnd;
+          wob = 1 + 0.13 * Math.sin(4.7 * s - t * 0.8 + 1.7) + 0.07 * Math.sin(9.5 * s + t * 1.1);
+          pts.push(L2S(x, W(x) * wob));
+        }
+        for (i = 1; i < 8; i++) {           // pyöreä alku sijaintisi takana
+          b = Math.PI / 2 + Math.PI * i / 8;
+          pts.push(L2S(w0 * scale * 0.8 * Math.cos(b), w0 * scale * Math.sin(b)));
+        }
+        return pts;
+      }
+      var grad = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, Lpx * 1.05);
+      grad.addColorStop(0, 'rgba(' + FAN_RGB + ',0.95)');
+      grad.addColorStop(0.3, 'rgba(' + FAN_RGB + ',0.7)');
+      grad.addColorStop(0.7, 'rgba(' + FAN_RGB + ',0.3)');
+      grad.addColorStop(1, 'rgba(' + FAN_RGB + ',0)');
+      ctx.fillStyle = grad;
+      // Useita sisäkkäisiä, läpikuultavia kerroksia: keskilinja vahvin ja reunat pehmeästi haalenevat.
+      for (var li = 0; li < 8; li++) {
+        var pts = shape(1 - li * 0.1);
+        ctx.globalAlpha = 0.16;
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      if (f.manual) {
+        var op = shape(1);
+        ctx.setLineDash([6, 5]);
+        ctx.strokeStyle = 'rgba(' + FAN_RGB + ',0.75)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(op[0][0], op[0][1]);
+        for (var j = 1; j < op.length; j++) ctx.lineTo(op[j][0], op[j][1]);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (REDUCED_MOTION) return;
+      // Hajuhiukkaset: lähtevät sijainnistasi, kulkevat myötätuuleen, kasvavat ja haalenevat.
+      for (var k = 0; k < this._parts.length; k++) {
+        var pt = this._parts[k];
+        var px = pt.s * xEnd * 1.05;
+        var xy = L2S(px, pt.u * (w0 + tanH * px) * (0.8 + 0.2 * Math.sin(t * 0.7 + pt.ph)) + 3 * Math.sin(t * 2.1 + pt.ph));
+        var alpha = 0.7 * Math.min(1, pt.s * 8) * Math.pow(1 - pt.s, 1.3);
+        var rad = (1.6 + 4.2 * pt.s) * pt.sz;
+        var pg = ctx.createRadialGradient(xy[0], xy[1], 0, xy[0], xy[1], rad);
+        pg.addColorStop(0, 'rgba(248,226,255,' + alpha.toFixed(3) + ')');
+        pg.addColorStop(1, 'rgba(' + FAN_RGB + ',0)');
+        ctx.fillStyle = pg;
+        ctx.beginPath();
+        ctx.arc(xy[0], xy[1], rad, 0, 6.2832);
+        ctx.fill();
+      }
+    }
+  });
+
   function drawWindFan() {
-    if (S.layers.wind) { map.removeLayer(S.layers.wind); S.layers.wind = null; }
     var w = currentWind();
-    if (!settings.showWind || !w || !S.pos) return;
-    var lat = S.pos.coords.latitude, lon = S.pos.coords.longitude;
-    var bearing = MK.norm360(w.dir + 180), half = MK.fanHalfAngle(w.spd), len = settings.fanLengthM;
-    var g = L.layerGroup();
-    [[0, len / 3, 0.4], [len / 3, 2 * len / 3, 0.26], [2 * len / 3, len, 0.14]].forEach(function (b) {
-      L.polygon(MK.fanBand(lat, lon, bearing, half, b[0], b[1], 18),
-        { pane: 'windPane', interactive: false, stroke: false, fillColor: WIND_COLOR, fillOpacity: b[2] }).addTo(g);
-    });
-    L.polygon(MK.fanBand(lat, lon, bearing, half, 0, len, 18),
-      { pane: 'windPane', interactive: false, fill: false, color: WIND_COLOR, weight: 2, opacity: 0.9, dashArray: w.manual ? '6 5' : null }).addTo(g);
-    S.layers.wind = g.addTo(map);
+    if (!settings.showWind || !w || !S.pos) {
+      if (S.layers.wind) { map.removeLayer(S.layers.wind); S.layers.wind = null; }
+      return;
+    }
+    var fan = {
+      lat: S.pos.coords.latitude, lon: S.pos.coords.longitude, bearing: MK.norm360(w.dir + 180),
+      half: MK.fanHalfAngle(w.spd), len: settings.fanLengthM, spd: w.spd, manual: !!w.manual
+    };
+    if (!S.layers.wind) S.layers.wind = new WindFanLayer().addTo(map);
+    S.layers.wind.setFan(fan);
   }
 
   function updateWindUi(opts) {
@@ -1203,7 +1365,7 @@
   loadIndex().then(function () {
     var last = store.get('lastArea', null);
     if (S.index && S.index.attribution) {
-      forestLayer.options.attribution = S.index.attribution.map(esc).join(' · ');
+      forestLayer.options.attribution = 'Luke, Syke, Ilmatieteen laitos (CC BY 4.0)';
     }
     if (last && findArea(last)) selectArea(last, { keepView: true });
     else if (S.areas.length === 1) selectArea(S.areas[0].id);

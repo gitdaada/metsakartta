@@ -181,12 +181,18 @@ def main():
         print("FMI-HAKU:", fmi_url.split("latlon=")[1].split("&")[0], "lähde:", page.evaluate("window.__mk.S.wind.source"))
         assert "latlon=61.24,25.1" in fmi_url and "61.2395" not in fmi_url, fmi_url   # alueen keskipiste, ei GPS
         assert page.inner_text("#windSpd").strip() == "4 m/s", page.inner_text("#windSpd")
-        fan = page.evaluate("""() => { const g = window.__mk.S.layers.wind; let n = 0; g.eachLayer(() => n++); 
-          const me = window.__mk.S.pos.coords; const ring = g.getLayers()[3].getLatLngs()[0];
-          const far = ring[Math.floor(ring.length/2)];
-          return {n, dLat: far.lat - me.latitude, dLon: far.lng - me.longitude}; }""")
+        page.wait_for_timeout(600)
+        fan = page.evaluate("""() => {
+          const lay = window.__mk.S.layers.wind, f = lay._fan, map = window.__mk.map, c = lay._canvas;
+          const dpr = c.width / map.getSize().x, ctx = c.getContext('2d');
+          const alphaAt = (b, d) => { const ll = MK.destPoint(f.lat, f.lon, b, d); const p = map.latLngToContainerPoint(ll);
+            return ctx.getImageData(Math.round(p.x*dpr), Math.round(p.y*dpr), 1, 1).data[3]; };
+          return { bearing: f.bearing, half: f.half, down25: alphaAt(f.bearing, f.len*0.25), down60: alphaAt(f.bearing, f.len*0.6),
+                   up: alphaAt(f.bearing + 180, f.len*0.3), side: alphaAt(f.bearing + 90, f.len*0.3) };
+        }""")
         print("VIUHKA:", fan)
-        assert fan["n"] == 4 and fan["dLat"] > 0 and fan["dLon"] > 0, fan     # lounaistuuli -> haju koilliseen
+        # lounaistuuli (225-227) -> haju koilliseen; liukuväri: lähellä vahvempi kuin kauempana; vastatuuleen ei mitään
+        assert 40 <= fan["bearing"] <= 50 and fan["down25"] > fan["down60"] > 0 and fan["up"] == 0 and fan["side"] == 0, fan
         page.screenshot(path=str(SHOTS / "12-tuuliviuhka.png"))
         page.click("#windBtn")
         page.wait_for_selector(".wind-now")
@@ -264,9 +270,13 @@ def main():
         page.dispatch_event("#oldAge", "change")
         page.click("#sheetClose")
         page.wait_for_timeout(800)
+        assert page.query_selector(".legend-fab") is not None    # selite piilossa oletuksena
+        page.click(".legend-fab")
         legend = page.inner_text(".legend")
         assert "≥ 60 v" in legend, legend
         page.screenshot(path=str(SHOTS / "10-raja60.png"))
+        page.click(".legend-close")
+        assert page.query_selector(".legend-fab") is not None
         # Taimikon vinoviivoitus lähikuvassa
         tp = page.evaluate("""() => {
           const F = window.__mk.S.forest; let best = null;
