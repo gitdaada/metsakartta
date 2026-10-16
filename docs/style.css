@@ -235,3 +235,20 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 36px; }
 @media (min-width: 700px) {
   .fabs { bottom: calc(110px + var(--safe-b)); }
 }
+
+/* --- Tuuli --- */
+.fab-wind { position: relative; }
+.fab-wind .wind-arrow { width: 24px; height: 24px; margin-top: -10px; transition: transform 0.3s; color: #e3a6ff; }
+.fab-wind .wind-spd { position: absolute; left: 0; right: 0; bottom: 5px; text-align: center; font-size: 10.5px; font-weight: 800; letter-spacing: -0.02em; }
+.fab-wind.manual .wind-arrow, .fab-wind.manual .wind-spd { color: var(--accent); }
+.sw-wind { border: 0; border-radius: 0; background: linear-gradient(90deg, rgba(196, 60, 255, 0.85), rgba(196, 60, 255, 0.2)); clip-path: polygon(0 50%, 100% 0, 100% 100%); }
+.wind-now { display: flex; align-items: center; gap: 14px; margin: 4px 0 6px; }
+.wind-dial { width: 56px; height: 56px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line); color: #e3a6ff; }
+.wind-title { font-size: 19px; font-weight: 800; }
+.wind-list { display: grid; gap: 2px; }
+.wind-row { display: grid; grid-template-columns: 56px 26px 1fr; align-items: center; min-height: 32px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.wind-row:last-child { border-bottom: 0; }
+.wind-t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.wind-mini { color: #e3a6ff; display: grid; place-items: center; }
+.wind-manual-label { font-weight: 700; }
+.wind-scale { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 0 4px; }

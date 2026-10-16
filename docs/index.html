@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avoin-karttakuva.maanmittauslaitos.fi https://tile.openstreetmap.org; connect-src 'self' https://avoin-karttakuva.maanmittauslaitos.fi; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avoin-karttakuva.maanmittauslaitos.fi https://tile.openstreetmap.org; connect-src 'self' https://avoin-karttakuva.maanmittauslaitos.fi https://opendata.fmi.fi https://api.open-meteo.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Metsäkartta</title>
   <meta name="description" content="Offline-kartta metsän iästä Metsähallituksen lupa-alueilla">
@@ -37,6 +37,10 @@
   </header>
 
   <nav class="fabs" aria-label="Karttatyökalut">
+    <button id="windBtn" class="fab fab-wind" type="button" aria-label="Tuuli" aria-haspopup="dialog" hidden>
+      <svg class="wind-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l6 8h-4v12h-4V10H6z" fill="currentColor"/></svg>
+      <span id="windSpd" class="wind-spd"></span>
+    </button>
     <button id="locateBtn" class="fab" type="button" aria-label="Oma sijainti" aria-pressed="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>

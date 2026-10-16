@@ -223,6 +223,96 @@
     return false;
   }
 
+  // --- Tuuli -------------------------------------------------------------------
+
+  var DIR_FROM = ['pohjoisesta', 'koillisesta', 'idästä', 'kaakosta', 'etelästä', 'lounaasta', 'lännestä', 'luoteesta'];
+  var DIR_TO = ['pohjoiseen', 'koilliseen', 'itään', 'kaakkoon', 'etelään', 'lounaaseen', 'länteen', 'luoteeseen'];
+
+  function norm360(d) { d = d % 360; return d < 0 ? d + 360 : d; }
+  function sector8(deg) { return Math.round(norm360(deg) / 45) % 8; }
+  /** Tuulen tulosuunta (meteorologinen, mistä puhaltaa) sanana: "lounaasta". */
+  function windFromName(deg) { return DIR_FROM[sector8(deg)]; }
+  /** Suunta, johon tuuli (ja haju) kulkee: "koilliseen". */
+  function windToName(deg) { return DIR_TO[sector8(deg + 180)]; }
+
+  /** Viuhkan puolikulma asteina tuulen nopeuden mukaan (heikko tuuli = epävarma suunta = leveä). */
+  function fanHalfAngle(speed) {
+    if (speed === null || speed === undefined || !isFinite(speed)) return 25;
+    if (speed < 1.5) return 45;
+    if (speed < 3) return 30;
+    if (speed < 6) return 22;
+    return 15;
+  }
+
+  /** Piste etäisyyden ja suunnan päässä (pallomalli). Palauttaa [lat, lon]. */
+  function destPoint(lat, lon, bearingDeg, distM) {
+    var R = 6371008.8, d = distM / R, b = bearingDeg * Math.PI / 180;
+    var p1 = lat * Math.PI / 180, l1 = lon * Math.PI / 180;
+    var p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+    var l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+    return [p2 * 180 / Math.PI, ((l2 * 180 / Math.PI + 540) % 360) - 180];
+  }
+
+  /** Viuhkan kaistale [r0, r1] metriä, keskisuunta bearing, puolikulma half. Palauttaa renkaan [[lat, lon], ...]. */
+  function fanBand(lat, lon, bearing, half, r0, r1, steps) {
+    var n = steps || 16, ring = [], i, a;
+    for (i = 0; i <= n; i++) { a = bearing - half + (2 * half * i / n); ring.push(destPoint(lat, lon, a, r1)); }
+    if (r0 <= 0) ring.push([lat, lon]);
+    else for (i = n; i >= 0; i--) { a = bearing - half + (2 * half * i / n); ring.push(destPoint(lat, lon, a, r0)); }
+    return ring;
+  }
+
+  function cleanNum(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+
+  /** Ilmatieteen laitoksen WFS "simple" -vastaus -> [{t, dir, spd, gust}]. Heittää virheen, jos vastaus on virheilmoitus. */
+  function parseFmiWind(xmlText, DOMParserCtor) {
+    var P = DOMParserCtor || (typeof DOMParser !== 'undefined' ? DOMParser : null);
+    var doc = new P().parseFromString(xmlText, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw new Error('FMI: virheellinen XML');
+    var ex = doc.getElementsByTagNameNS('*', 'ExceptionText');
+    if (ex.length) throw new Error('FMI: ' + (ex[0].textContent || 'virhe').trim().slice(0, 160));
+    var els = doc.getElementsByTagNameNS('*', 'BsWfsElement'), byT = {};
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      var t = Date.parse((el.getElementsByTagNameNS('*', 'Time')[0] || {}).textContent);
+      var name = ((el.getElementsByTagNameNS('*', 'ParameterName')[0] || {}).textContent || '').trim();
+      var val = cleanNum(((el.getElementsByTagNameNS('*', 'ParameterValue')[0] || {}).textContent || '').trim());
+      if (!isFinite(t)) continue;
+      var e = byT[t] || (byT[t] = { t: t, dir: null, spd: null, gust: null });
+      if (name === 'WindDirection') e.dir = val;
+      else if (name === 'WindSpeedMS') e.spd = val;
+      else if (name === 'WindGust') e.gust = val;
+    }
+    return Object.keys(byT).map(function (k) { return byT[k]; })
+      .filter(function (e) { return e.dir !== null; })
+      .sort(function (a, b) { return a.t - b.t; });
+  }
+
+  /** Open-Meteo JSON -> [{t, dir, spd, gust}] (ajat GMT). */
+  function parseOpenMeteoWind(j) {
+    var hr = j && j.hourly;
+    if (!hr || !hr.time) throw new Error('Open-Meteo: odottamaton vastaus');
+    var out = [];
+    for (var i = 0; i < hr.time.length; i++) {
+      var t = Date.parse(hr.time[i] + (/Z$|[+-]\d\d:?\d\d$/.test(hr.time[i]) ? '' : 'Z'));
+      var dir = cleanNum(hr.wind_direction_10m && hr.wind_direction_10m[i]);
+      if (!isFinite(t) || dir === null) continue;
+      out.push({ t: t, dir: dir, spd: cleanNum(hr.wind_speed_10m && hr.wind_speed_10m[i]), gust: cleanNum(hr.wind_gusts_10m && hr.wind_gusts_10m[i]) });
+    }
+    return out;
+  }
+
+  /** Lähin ennustetunti hetkelle now (enintään 90 min päässä), muuten null. */
+  function pickWind(series, now) {
+    var best = null, bd = Infinity;
+    (series || []).forEach(function (e) { var d = Math.abs(e.t - now); if (d < bd) { bd = d; best = e; } });
+    return bd <= 90 * 60 * 1000 ? best : null;
+  }
+
   /** Tiilen välimuistiavain ilman api-avainta: sama tiili säilyy, vaikka avain vaihtuu. */
   function tileCacheKey(url) {
     var q = url.indexOf('?');
@@ -235,6 +325,9 @@
     lonLatToMerc: lonLatToMerc, mercToLonLat: mercToLonLat,
     lon2tile: lon2tile, lat2tile: lat2tile, tileRange: tileRange, countTiles: countTiles, listTiles: listTiles,
     decodeRGB: decodeRGB, makeForest: makeForest, sampleIndex: sampleIndex, renderTile: renderTile,
-    describe: describe, stats: stats, geometryContains: geometryContains, tileCacheKey: tileCacheKey
+    describe: describe, stats: stats, geometryContains: geometryContains, tileCacheKey: tileCacheKey,
+    norm360: norm360, windFromName: windFromName, windToName: windToName, fanHalfAngle: fanHalfAngle,
+    destPoint: destPoint, fanBand: fanBand, parseFmiWind: parseFmiWind, parseOpenMeteoWind: parseOpenMeteoWind,
+    pickWind: pickWind
   };
 })(typeof self !== 'undefined' ? self : this);

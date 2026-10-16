@@ -62,6 +62,44 @@ def serve(handler, port):
     return srv
 
 
+WIND_CALLS = []
+FMI_MODE = {"mode": "ok"}
+
+
+def fmi_xml(dir_deg=225.0, spd=4.2, gust=8.1):
+    import datetime as dt
+    t0 = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=1)
+    members = []
+    for i in range(62):
+        t = (t0 + dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for name, val in (("WindDirection", dir_deg + i), ("WindSpeedMS", spd), ("WindGust", gust)):
+            members.append(f"""<wfs:member><BsWfs:BsWfsElement gml:id="e{i}{name}"><BsWfs:Location><gml:Point gml:id="p" srsName="http://www.opengis.net/def/crs/EPSG/0/4258"><gml:pos>61.24 25.10 </gml:pos></gml:Point></BsWfs:Location><BsWfs:Time>{t}</BsWfs:Time><BsWfs:ParameterName>{name}</BsWfs:ParameterName><BsWfs:ParameterValue>{val}</BsWfs:ParameterValue></BsWfs:BsWfsElement></wfs:member>""")
+    return ('<?xml version="1.0" encoding="UTF-8"?><wfs:FeatureCollection timeStamp="x" numberMatched="1" numberReturned="1" '
+            'xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:gml="http://www.opengis.net/gml/3.2" xmlns:BsWfs="http://xml.fmi.fi/schema/wfs/2.0">'
+            + "".join(members) + "</wfs:FeatureCollection>")
+
+
+def om_json():
+    import datetime as dt
+    t0 = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0) - dt.timedelta(hours=1)
+    times = [(t0 + dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M") for i in range(61)]
+    return json.dumps({"hourly": {"time": times, "wind_direction_10m": [300] * 61, "wind_speed_10m": [1.0] * 61, "wind_gusts_10m": [2.5] * 61}})
+
+
+def handle_fmi(route):
+    WIND_CALLS.append(route.request.url)
+    hdr = {"Access-Control-Allow-Origin": "*"}
+    if FMI_MODE["mode"] == "down":
+        route.abort()
+    else:
+        route.fulfill(status=200, headers=hdr, content_type="text/xml", body=fmi_xml())
+
+
+def handle_om(route):
+    WIND_CALLS.append(route.request.url)
+    route.fulfill(status=200, headers={"Access-Control-Allow-Origin": "*"}, content_type="application/json", body=om_json())
+
+
 def main():
     serve(partial(Quiet, directory=str(SITE)), 8000)
     serve(TileHandler, 8001)
@@ -75,6 +113,8 @@ def main():
           if (!localStorage.getItem('mk_settings')) localStorage.setItem('mk_settings', JSON.stringify({
             apiKey: 'testikey', mmlBase: 'http://127.0.0.1:8001/avoin/wmts/1.0.0', maxZoom: 15 }));
         """)
+        ctx.route("https://opendata.fmi.fi/**", handle_fmi)
+        ctx.route("https://api.open-meteo.com/**", handle_om)
         page = ctx.new_page()
         page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}") if m.type in ("error", "warning") else None)
         page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
@@ -135,6 +175,50 @@ def main():
         print("GPS:", gps)
         page.screenshot(path=str(SHOTS / "04-gps.png"))
 
+        # Tuuli: ennuste Ilmatieteen laitokselta, viuhka GPS-pisteestä
+        page.wait_for_function("() => window.__mk.S.wind && window.__mk.S.layers.wind", timeout=15000)
+        fmi_url = [u for u in WIND_CALLS if "opendata.fmi.fi" in u][-1]
+        print("FMI-HAKU:", fmi_url.split("latlon=")[1].split("&")[0], "lähde:", page.evaluate("window.__mk.S.wind.source"))
+        assert "latlon=61.24,25.1" in fmi_url and "61.2395" not in fmi_url, fmi_url   # alueen keskipiste, ei GPS
+        assert page.inner_text("#windSpd").strip() == "4 m/s", page.inner_text("#windSpd")
+        fan = page.evaluate("""() => { const g = window.__mk.S.layers.wind; let n = 0; g.eachLayer(() => n++); 
+          const me = window.__mk.S.pos.coords; const ring = g.getLayers()[3].getLatLngs()[0];
+          const far = ring[Math.floor(ring.length/2)];
+          return {n, dLat: far.lat - me.latitude, dLon: far.lng - me.longitude}; }""")
+        print("VIUHKA:", fan)
+        assert fan["n"] == 4 and fan["dLat"] > 0 and fan["dLon"] > 0, fan     # lounaistuuli -> haju koilliseen
+        page.screenshot(path=str(SHOTS / "12-tuuliviuhka.png"))
+        page.click("#windBtn")
+        page.wait_for_selector(".wind-now")
+        wtxt = page.inner_text("#sheetBody")
+        print("TUULI:", wtxt.split("\n")[0:3])
+        assert "lounaasta" in wtxt and "koilliseen" in wtxt and "Ilmatieteen laitos" in wtxt, wtxt
+        page.screenshot(path=str(SHOTS / "13-tuulipaneeli.png"))
+        page.click("text=Käytä omaa havaintoa")
+        page.wait_for_selector("input[type=range][aria-label^='Tuulen']")
+        page.evaluate("""() => { const r = document.querySelector("input[aria-label^='Tuulen']"); r.value = '90';
+          r.dispatchEvent(new Event('input', {bubbles:true})); r.dispatchEvent(new Event('change', {bubbles:true})); }""")
+        cw = page.evaluate("window.__mk.currentWind()")
+        assert cw["manual"] and cw["dir"] == 90, cw
+        assert "idästä" in page.inner_text("#sheetBody")
+        page.screenshot(path=str(SHOTS / "14-oma-havainto.png"))
+        page.click("text=Käytä omaa havaintoa")
+        page.wait_for_function("() => !window.__mk.currentWind().manual")
+        # Varalähde: FMI ei vastaa -> Open-Meteo
+        FMI_MODE["mode"] = "down"
+        n_err = len(errors)
+        ok = page.evaluate("window.__mk.refreshWind(window.__mk.S.area, {force: true})")
+        src = page.evaluate("window.__mk.S.wind.source")
+        print("VARALÄHDE:", ok, src, page.inner_text("#windSpd"))
+        assert ok and src == "open-meteo", (ok, src)
+        assert any("api.open-meteo.com" in u and "latitude=61.24" in u for u in WIND_CALLS)
+        # Tahallisen katkon odotetut virheilmoitukset pois
+        errors[n_err:] = [e for e in errors[n_err:] if "Failed to load resource" not in e and "FMI ei käytettävissä" not in e]
+        page.click("#sheetClose")
+        FMI_MODE["mode"] = "ok"
+        page.evaluate("window.__mk.refreshWind(window.__mk.S.area, {force: true})")
+        page.wait_for_function("() => window.__mk.S.wind.source === 'fmi'")
+
         # Offline-tallennus
         page.click("#areaBtn")
         page.wait_for_selector(".area-card")
@@ -163,6 +247,9 @@ def main():
         print("OFFLINE TIILET:", tiles, "verkko:", page.evaluate("navigator.onLine"))
         assert tiles["loaded"] >= max(1, tiles["total"] - 2), tiles
         page.screenshot(path=str(SHOTS / "07-offline.png"))
+        # Tuuliennuste toimii ilman verkkoa tallennetusta datasta
+        page.wait_for_function("() => window.__mk.currentWind() !== null", timeout=5000)
+        print("OFFLINE TUULI:", page.inner_text("#windSpd"), page.evaluate("window.__mk.currentWind().dir"))
 
         # Tasot ja asetukset
         page.click("#layersBtn")

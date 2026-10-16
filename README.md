@@ -10,8 +10,11 @@ Offline-toimiva karttasovellus metsästykseen: näyttää Metsähallituksen lupa
 | Vinoviivoitus | Taimikko (alle 7 m) |
 | Keltainen katkoviiva | Luonnonsuojelualue |
 | Musta viiva | Lupa-alueen raja |
+| Violetti viuhka | Tuulen mukana kulkeva hajusi (oma sijainti → myötätuuleen) |
 
 Napauttamalla karttaa näet ruudun arvioidun iän ja pituuden, mahdollisen suojelualueen sekä etäisyyden omasta sijainnistasi.
+
+**Tuuli:** sovellus hakee alueelle tuulen tuntiennusteen (n. 60 h) ja tallentaa sen puhelimeen, joten tuuliviuhka toimii myös ilman verkkoa. Tuulipainikkeesta näet ennusteen ja voit asettaa suunnan itse oman havainnon mukaan (savu, lumi, heinä). Viuhka on sitä leveämpi, mitä heikompi tuuli, koska heikon tuulen suunta on epävarma.
 
 ## Käyttöönotto
 
@@ -32,6 +35,7 @@ Napauttamalla karttaa näet ruudun arvioidun iän ja pituuden, mahdollisen suoje
 
 - Metsätieto: Luonnonvarakeskus, monilähteinen valtakunnan metsien inventointi (MVMI) 2023, CC BY 4.0.
 - Luonnonsuojelualueet: Syke / Metsähallitus, CC BY 4.0.
+- Tuuliennuste: Ilmatieteen laitos, avoin data (CC BY 4.0). Varalla Open-Meteo (CC BY 4.0, ilmainen vain ei-kaupalliseen käyttöön).
 - Pohjakartta: Maanmittauslaitos, CC BY 4.0 (tai OpenStreetMap ilman API-avainta, vain verkossa).
 - Kirjasto: Leaflet 1.9.4 (BSD-2).
 
@@ -40,6 +44,7 @@ MVMI on satelliittikuviin ja koealoihin perustuva arvio. Yksittäisen ruudun arv
 ## Tietosuoja
 
 - Sijaintia ei lähetetä minnekään. Se käsitellään vain puhelimen selaimessa.
+- Tuuliennuste haetaan lupa-alueen keskipisteeseen (pyöristettynä), ei käyttäjän sijaintiin.
 - Sovelluksessa ei ole kirjautumista, analytiikkaa eikä palvelinta.
 - Repo on julkinen. Siitä näkyvät sovelluksen koodi ja lupa-alueiden rajat.
 

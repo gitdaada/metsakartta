@@ -30,6 +30,7 @@
   var DEFAULTS = {
     apiKey: '', basemap: 'maastokartta', oldAge: 80, taimikkoM: 7, treelessM: 0.5, maxZoom: 16, offlineOrtho: false,
     wakeLock: false, opacity: 0.7, showForest: true, showProtected: true, showMask: true, gpsOn: false,
+    showWind: true, fanLengthM: 200,
     mmlBase: ''
   };
   function num(v, d, min, max) { v = Number(v); return isFinite(v) ? Math.max(min, Math.min(max, v)) : d; }
@@ -42,7 +43,8 @@
     s.treelessM = num(s.treelessM, DEFAULTS.treelessM, 0, 3);
     s.maxZoom = s.maxZoom === 15 ? 15 : 16;
     s.opacity = num(s.opacity, DEFAULTS.opacity, 0.2, 1);
-    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn'].forEach(function (k) { s[k] = !!s[k]; });
+    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn', 'showWind'].forEach(function (k) { s[k] = !!s[k]; });
+    s.fanLengthM = [100, 200, 300, 500].indexOf(Number(s.fanLengthM)) >= 0 ? Number(s.fanLengthM) : DEFAULTS.fanLengthM;
     s.mmlBase = typeof s.mmlBase === 'string' ? s.mmlBase : '';
     return s;
   }
@@ -125,6 +127,7 @@
   map.createPane('protCasingPane').style.zIndex = 410;
   map.createPane('protPane').style.zIndex = 420;
   map.createPane('boundaryPane').style.zIndex = 430;
+  map.createPane('windPane').style.zIndex = 435;
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 
   map.on('moveend', function () {
@@ -251,6 +254,7 @@
         '<li><span class="sw" style="background:' + hatch + '"></span>Taimikko (alle ' + String(settings.taimikkoM).replace('.', ',') + ' m)</li>' +
         '<li><span class="sw sw-dash"></span>Luonnonsuojelualue</li>' +
         '<li><span class="sw sw-line"></span>Lupa-alueen raja</li>' +
+        (settings.showWind ? '<li><span class="sw sw-wind"></span>Tuuliviuhka (hajusi kulku)</li>' : '') +
         '</ul>';
       if (S.stats && S.stats.total) {
         var st = S.stats, forest = st.young + st.old;
@@ -382,6 +386,9 @@
     S.area = a;
     store.set('lastArea', id);
     $('areaName').textContent = a.name;
+    loadWindCache(a);
+    updateWindUi();
+    refreshWind(a);
     if (!opts.keepView) fitArea(a);
     return Promise.all([fetchJSON(a.boundary), fetchJSON(a.protected).catch(function () { return { type: 'FeatureCollection', features: [] }; })])
       .then(function (res) {
@@ -489,6 +496,7 @@
     chip.hidden = false;
     chip.className = 'chip chip-gps';
     chip.textContent = 'GPS ±' + fmtInt(acc) + ' m';
+    drawWindFan();
     if (S.firstFix || S.follow) {
       map.setView(ll, S.firstFix ? Math.max(map.getZoom(), 15) : map.getZoom(), { animate: !S.firstFix });
       S.firstFix = false;
@@ -523,6 +531,7 @@
     $('gpsChip').hidden = true;
     $('locateBtn').setAttribute('aria-pressed', 'false');
     settings.gpsOn = false; saveSettings();
+    drawWindFan();
   }
 
   function setFollow(on) {
@@ -654,6 +663,7 @@
       .then(function () {
         if (job.ctrl.signal.aborted) throw new Error('Keskeytetty');
         offline[a.id] = { version: a.version, date: Date.now(), maxZoom: settings.maxZoom, layers: layers, tiles: tiles.length, failed: job.failed };
+        refreshWind(a, { force: true });
         saveOffline();
         S.dl = null;
         job.ui.finish(null, job);
@@ -908,7 +918,8 @@
       '<p>Pohjakartta: © Maanmittauslaitos (CC BY 4.0) tai © OpenStreetMapin tekijät.</p>' +
       '<p>Metsätieto on satelliittikuviin perustuva arvio. Yksittäisen 16 m ruudun arvo voi poiketa todellisuudesta, mutta isompien kuvioiden yleiskuva on luotettavampi. ' +
       'Lupa-alueen raja on käsin piirretty: virallinen raja on eräluvat.fi:n kartassa.</p>' +
-      '<p>Sijaintisi käsitellään vain tässä laitteessa eikä sitä lähetetä minnekään.</p>' }));
+      '<p>Tuuliennuste: Ilmatieteen laitos (CC BY 4.0), varalla Open-Meteo (CC BY 4.0).</p>' +
+      '<p>Sijaintisi käsitellään vain tässä laitteessa eikä sitä lähetetä minnekään. Tuuliennuste haetaan lupa-alueen keskipisteeseen, ei sijaintiisi.</p>' }));
   }
 
   function numberField(id, label, value, min, max, step, hint, set) {
@@ -925,6 +936,7 @@
 
   $('areaBtn').addEventListener('click', function () { openSheet('areas', 'Lupa-alueet', renderAreasSheet); });
   $('layersBtn').addEventListener('click', function () { openSheet('layers', 'Karttatasot', renderLayersSheet); });
+  $('windBtn').addEventListener('click', function () { openSheet('wind', 'Tuuli', renderWindSheet); });
   $('settingsBtn').addEventListener('click', function () { openSheet('settings', 'Asetukset', renderSettingsSheet); });
   $('zoomInBtn').addEventListener('click', function () { map.zoomIn(); });
   $('zoomOutBtn').addEventListener('click', function () { map.zoomOut(); });
@@ -932,6 +944,235 @@
     var t = e.target.closest('[data-open-settings]');
     if (t) { e.preventDefault(); openSheet('settings', 'Asetukset', renderSettingsSheet); }
   });
+
+  // ---------------------------------------------------------------------------
+  // Tuuli ja tuuliviuhka
+  // ---------------------------------------------------------------------------
+
+  var FMI_WFS = 'https://opendata.fmi.fi/wfs';
+  var OPEN_METEO = 'https://api.open-meteo.com/v1/forecast';
+  var WIND_MAX_AGE = 60 * 60 * 1000;
+  var WIND_COLOR = '#c43cff';
+  var windManual = (function (m) {
+    return m && isFinite(Number(m.dir)) ? { dir: MK.norm360(Math.round(Number(m.dir))), at: Number(m.at) || Date.now() } : null;
+  })(store.get('windManual', null));
+  S.wind = null;
+  S.windLoading = false;
+
+  function fmt1(n) { return (Math.round(n * 10) / 10).toString().replace('.', ','); }
+  function fmtWhen(ms) {
+    var d = new Date(ms), now = new Date();
+    var hm = d.toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' });
+    return (d.toDateString() === now.toDateString() ? 'klo ' : d.getDate() + '.' + (d.getMonth() + 1) + '. klo ') + hm;
+  }
+  function windPoint(a) { return [Math.round(a.center[0] * 100) / 100, Math.round(a.center[1] * 100) / 100]; }
+  function windKey(a) { return 'wind_' + a.id; }
+  function loadWindCache(a) {
+    var w = store.get(windKey(a), null);
+    S.wind = w && Array.isArray(w.series) ? w : null;
+  }
+  function isoHour(ms) { var d = new Date(ms); d.setUTCMinutes(0, 0, 0); return d.toISOString().replace('.000Z', 'Z'); }
+
+  function fetchWithTimeout(url, ms) {
+    var c = new AbortController();
+    var t = setTimeout(function () { c.abort(); }, ms);
+    return fetch(url, { signal: c.signal, credentials: 'omit', cache: 'no-store' })
+      .then(function (r) { clearTimeout(t); return r; }, function (e) { clearTimeout(t); throw e; });
+  }
+
+  function fetchFmi(lat, lon, params) {
+    var now = Date.now();
+    var q = 'service=WFS&version=2.0.0&request=getFeature' +
+      '&storedquery_id=fmi::forecast::edited::weather::scandinavia::point::simple' +
+      '&latlon=' + lat + ',' + lon + '&parameters=' + params + '&timestep=60' +
+      '&starttime=' + isoHour(now - 3600000) + '&endtime=' + isoHour(now + 60 * 3600000);
+    return fetchWithTimeout(FMI_WFS + '?' + q, 15000).then(function (r) { return r.text(); }).then(function (txt) {
+      var s = MK.parseFmiWind(txt);
+      if (!s.length) throw new Error('FMI: ei tuulitietoa');
+      return s;
+    });
+  }
+
+  function fetchOpenMeteo(lat, lon) {
+    var q = 'latitude=' + lat + '&longitude=' + lon +
+      '&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=ms&timezone=GMT&past_hours=1&forecast_hours=60';
+    return fetchWithTimeout(OPEN_METEO + '?' + q, 15000).then(function (r) {
+      if (!r.ok) throw new Error('Open-Meteo HTTP ' + r.status);
+      return r.json();
+    }).then(function (j) {
+      var s = MK.parseOpenMeteoWind(j);
+      if (!s.length) throw new Error('Open-Meteo: ei tuulitietoa');
+      return s;
+    });
+  }
+
+  /** Hakee alueen tuulen tuntiennusteen (n. 60 h) ja tallentaa sen laitteeseen offline-käyttöä varten. */
+  function refreshWind(a, opts) {
+    a = a || S.area; opts = opts || {};
+    if (!a || S.windLoading || !navigator.onLine) return Promise.resolve(false);
+    var cached = store.get(windKey(a), null);
+    if (!opts.force && cached && Date.now() - cached.fetched < WIND_MAX_AGE) return Promise.resolve(false);
+    var pt = windPoint(a), src = 'fmi';
+    S.windLoading = true;
+    updateWindUi({ noFan: true });
+    return fetchFmi(pt[0], pt[1], 'WindDirection,WindSpeedMS,WindGust')
+      .catch(function (e) {
+        if (/^FMI:/.test(e.message)) return fetchFmi(pt[0], pt[1], 'WindDirection,WindSpeedMS');
+        throw e;
+      })
+      .catch(function (e) {
+        console.warn('FMI ei käytettävissä, käytetään Open-Meteota:', e && e.message);
+        src = 'open-meteo';
+        return fetchOpenMeteo(pt[0], pt[1]);
+      })
+      .then(function (series) {
+        var w = { areaId: a.id, series: series, fetched: Date.now(), source: src, lat: pt[0], lon: pt[1] };
+        store.set(windKey(a), w);
+        if (S.area && S.area.id === a.id) S.wind = w;
+        return true;
+      })
+      .catch(function (e) {
+        console.warn('Tuuliennusteen haku epäonnistui:', e && e.message);
+        if (opts.force) toast('Tuuliennustetta ei saatu: ' + (e && e.message));
+        return false;
+      })
+      .then(function (ok) { S.windLoading = false; updateWindUi(); return ok; });
+  }
+
+  function currentWind() {
+    if (windManual) return { dir: windManual.dir, spd: null, gust: null, manual: true, at: windManual.at };
+    if (!S.wind || !S.wind.series) return null;
+    var e = MK.pickWind(S.wind.series, Date.now());
+    return e ? { dir: e.dir, spd: e.spd, gust: e.gust, t: e.t, manual: false } : null;
+  }
+
+  function drawWindFan() {
+    if (S.layers.wind) { map.removeLayer(S.layers.wind); S.layers.wind = null; }
+    var w = currentWind();
+    if (!settings.showWind || !w || !S.pos) return;
+    var lat = S.pos.coords.latitude, lon = S.pos.coords.longitude;
+    var bearing = MK.norm360(w.dir + 180), half = MK.fanHalfAngle(w.spd), len = settings.fanLengthM;
+    var g = L.layerGroup();
+    [[0, len / 3, 0.4], [len / 3, 2 * len / 3, 0.26], [2 * len / 3, len, 0.14]].forEach(function (b) {
+      L.polygon(MK.fanBand(lat, lon, bearing, half, b[0], b[1], 18),
+        { pane: 'windPane', interactive: false, stroke: false, fillColor: WIND_COLOR, fillOpacity: b[2] }).addTo(g);
+    });
+    L.polygon(MK.fanBand(lat, lon, bearing, half, 0, len, 18),
+      { pane: 'windPane', interactive: false, fill: false, color: WIND_COLOR, weight: 2, opacity: 0.9, dashArray: w.manual ? '6 5' : null }).addTo(g);
+    S.layers.wind = g.addTo(map);
+  }
+
+  function updateWindUi(opts) {
+    opts = opts || {};
+    var btn = $('windBtn'), arrow = btn.querySelector('.wind-arrow'), spd = $('windSpd');
+    var w = currentWind();
+    btn.hidden = !S.area && !windManual;
+    if (w) {
+      arrow.style.transform = 'rotate(' + Math.round(MK.norm360(w.dir + 180)) + 'deg)';
+      arrow.style.opacity = '1';
+      spd.textContent = w.manual ? 'oma' : (w.spd !== null ? Math.round(w.spd) + ' m/s' : '');
+      btn.setAttribute('aria-label', 'Tuuli ' + MK.windFromName(w.dir) + (w.spd !== null ? ' ' + fmt1(w.spd) + ' m/s' : '') + '. Avaa tuulitiedot.');
+    } else {
+      arrow.style.transform = 'rotate(0deg)';
+      arrow.style.opacity = '0.3';
+      spd.textContent = S.windLoading ? '…' : '–';
+      btn.setAttribute('aria-label', 'Tuuli: ei tietoa. Avaa tuulitiedot.');
+    }
+    btn.classList.toggle('manual', !!(w && w.manual));
+    if (!opts.noFan) drawWindFan();
+    if (!opts.noSheet && currentSheet && currentSheet.name === 'wind') renderSheet();
+  }
+
+  function arrowSvg(rot, size) {
+    return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" style="transform:rotate(' + Math.round(rot) + 'deg)" aria-hidden="true">' +
+      '<path d="M12 2l6 8h-4v12h-4V10H6z" fill="currentColor"/></svg>';
+  }
+
+  function renderWindSheet(body) {
+    var w = currentWind();
+    if (w) {
+      var line2 = (w.gust !== null && w.gust !== undefined ? 'Puuskissa ' + fmt1(w.gust) + ' m/s · ' : '') + 'Hajusi kulkee ' + MK.windToName(w.dir);
+      body.appendChild(h('div', { class: 'wind-now' },
+        h('span', { class: 'wind-dial', html: arrowSvg(MK.norm360(w.dir + 180), 40) }),
+        h('div', null,
+          h('div', { class: 'wind-title', text: 'Tuuli ' + MK.windFromName(w.dir) + (w.spd !== null ? ' ' + fmt1(w.spd) + ' m/s' : '') }),
+          h('div', { class: 'muted small', text: line2 }),
+          h('div', { class: 'muted small', text: w.manual ? 'Oma havainto ' + fmtWhen(w.at) : 'Ennuste ' + fmtWhen(w.t) }))));
+      if (!w.manual && w.spd !== null && w.spd < 1.5) {
+        body.appendChild(h('div', { class: 'notice', text: 'Heikko tuuli: suunta on epävarma ja voi vaihdella, joten viuhka on leveä.' }));
+      }
+    } else {
+      body.appendChild(h('p', { class: 'muted', text: S.windLoading ? 'Haetaan tuuliennustetta…' :
+        (S.area ? 'Ei voimassa olevaa tuuliennustetta. Hae ennuste verkossa tai aseta suunta itse.' : 'Valitse ensin lupa-alue.') }));
+    }
+    if (settings.showWind && !S.pos) body.appendChild(h('p', { class: 'muted small', text: 'Viuhka näkyy kartalla, kun oma sijainti on päällä.' }));
+
+    // Ennuste
+    body.appendChild(h('h3', { text: 'Ennuste' }));
+    if (S.wind && S.wind.series && S.wind.series.length) {
+      var now = Date.now(), list = h('div', { class: 'wind-list' });
+      S.wind.series.filter(function (e) { return e.t >= now - 30 * 60000; }).slice(0, 8).forEach(function (e) {
+        list.appendChild(h('div', { class: 'wind-row' },
+          h('span', { class: 'wind-t', text: new Date(e.t).toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' }) }),
+          h('span', { class: 'wind-mini', html: arrowSvg(MK.norm360(e.dir + 180), 18) }),
+          h('span', { text: MK.windFromName(e.dir) + (e.spd !== null ? ' ' + fmt1(e.spd) + ' m/s' : '') + (e.gust !== null ? ' (' + fmt1(e.gust) + ')' : '') })));
+      });
+      body.appendChild(list);
+      var last = S.wind.series[S.wind.series.length - 1];
+      body.appendChild(h('p', { class: 'muted small', text: (S.wind.source === 'fmi' ? 'Ilmatieteen laitos' : 'Open-Meteo') +
+        ' · haettu ' + fmtWhen(S.wind.fetched) + ' · voimassa ' + fmtWhen(last.t) + ' asti · lupa-alueen keskipiste' }));
+    } else {
+      body.appendChild(h('p', { class: 'muted small', text: 'Ennustetta ei ole tallennettu tälle alueelle.' }));
+    }
+    body.appendChild(h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn', disabled: !navigator.onLine || S.windLoading || !S.area,
+      text: navigator.onLine ? 'Päivitä ennuste' : 'Päivitys vaatii verkon',
+      onclick: function () { refreshWind(S.area, { force: true }); } })));
+
+    // Oma havainto
+    body.appendChild(h('h3', { text: 'Oma havainto' }));
+    body.appendChild(toggleRow('Käytä omaa havaintoa', 'Esim. savu, lumi tai kuiva heinä', !!windManual, function (v) {
+      if (v) {
+        var cw = currentWind();
+        windManual = { dir: cw ? Math.round(cw.dir / 5) * 5 % 360 : 0, at: Date.now() };
+      } else windManual = null;
+      store.set('windManual', windManual);
+      updateWindUi();
+    }));
+    if (windManual) {
+      var lbl = h('div', { class: 'wind-manual-label' });
+      var setLbl = function () { lbl.textContent = 'Tuuli ' + MK.windFromName(windManual.dir) + ' (' + windManual.dir + '°) → hajusi kulkee ' + MK.windToName(windManual.dir); };
+      setLbl();
+      var range = h('input', { type: 'range', min: '0', max: '355', step: '5', value: String(windManual.dir), 'aria-label': 'Tuulen tulosuunta asteina' });
+      range.addEventListener('input', function () {
+        windManual = { dir: Number(range.value), at: Date.now() };
+        setLbl();
+        updateWindUi({ noSheet: true });
+      });
+      range.addEventListener('change', function () { store.set('windManual', windManual); });
+      body.appendChild(h('div', { class: 'field' }, lbl, range,
+        h('div', { class: 'wind-scale' }, h('span', { text: 'P' }), h('span', { text: 'I' }), h('span', { text: 'E' }), h('span', { text: 'L' }), h('span', { text: 'P' }))));
+    }
+
+    // Näyttö
+    body.appendChild(h('h3', { text: 'Viuhka' }));
+    body.appendChild(toggleRow('Näytä tuuliviuhka', 'Lähtee omasta sijainnistasi myötätuuleen', settings.showWind, function (v) {
+      settings.showWind = v; saveSettings(); renderLegend(); updateWindUi();
+    }));
+    var seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Viuhkan pituus' });
+    [100, 200, 300, 500].forEach(function (m) {
+      seg.appendChild(h('button', { type: 'button', 'aria-pressed': String(settings.fanLengthM === m), text: m + ' m',
+        onclick: function () { settings.fanLengthM = m; saveSettings(); updateWindUi(); } }));
+    });
+    body.appendChild(h('div', { class: 'field' }, h('span', { class: 'label', text: 'Viuhkan pituus' }), seg));
+    body.appendChild(h('p', { class: 'muted small', text: 'Ennuste kuvaa tuulta avoimessa maastossa 10 metrin korkeudella. Metsässä maan tasolla tuuli on heikompaa ja kääntyilee maaston mukaan, joten viuhka näyttää vain yleissuunnan. Viuhkan leveys kertoo epävarmuudesta: mitä heikompi tuuli, sitä leveämpi viuhka.' }));
+  }
+
+  // Kellon ja verkon mukana: tunnin vaihtuessa uusi ennustearvo, verkossa vanhentunut ennuste päivitetään.
+  setInterval(function () {
+    updateWindUi({ noSheet: true });
+    if (S.area && navigator.onLine) refreshWind(S.area);
+  }, 60000);
+  window.addEventListener('online', function () { if (S.area) refreshWind(S.area); });
 
   // ---------------------------------------------------------------------------
   // Verkon tila ja service worker
@@ -975,5 +1216,6 @@
   });
 
   // Testejä varten
-  window.__mk = { S: S, settings: settings, map: map, selectArea: selectArea, offline: function () { return offline; } };
+  window.__mk = { S: S, settings: settings, map: map, selectArea: selectArea, offline: function () { return offline; },
+    refreshWind: refreshWind, currentWind: currentWind };
 })();
