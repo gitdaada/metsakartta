@@ -32,8 +32,8 @@ PRACTICE_NAMES = {
 # Koodisto 1013 (hakkuun tarkoitus)
 PURPOSE_NAMES = {1: "Kasvatushakkuu", 2: "Kasvatushakkuu, eri-ikäinen", 3: "Uudistushakkuu", 4: "Erityishakkuu",
                  5: "Maankäytön muutos", 6: "Metsätuhoalue"}
-# Hakkuutavat, jotka eivät avaa metsää (harvennukset)
-THINNING = {1, 2, 3, 12, 13, 20}
+# Hakkuutavat, joissa metsää jää pystyyn (harvennukset, suojus- ja verhopuuhakkuu): ei näytetä.
+LEAVES_TREES = {2, 3, 6, 7, 12, 13, 20}
 
 
 # ---------------------------------------------------------------------------
@@ -62,12 +62,15 @@ def _int(v):
 
 
 def declaration_kind(props: dict, practices, purposes) -> str | None:
-    """Hakkuutavan nimi, jos ilmoitettu hakkuu avaa metsää (uudistushakkuu, tuhoalue tms.), muuten None."""
+    """Hakkuutavan nimi, jos ilmoitettu hakkuu avaa metsän (avohakkuu, siemenpuuhakkuu, tuhoalueen
+    raivaus tms.), muuten None. Harvennukset ja hakkuut, joissa metsää jää pystyyn, ohitetaan."""
     pr = _int(props.get("CUTTINGREALIZATIONPRACTICE"))
     pu = _int(props.get("CUTTINGPURPOSE"))
     if pr in practices:
         return PRACTICE_NAMES.get(pr, "Uudistushakkuu")
-    if pu in purposes and pr not in THINNING:
+    if pr in LEAVES_TREES:
+        return None
+    if pu in purposes:
         return PRACTICE_NAMES.get(pr) or PURPOSE_NAMES.get(pu, "Uudistushakkuu")
     return None
 

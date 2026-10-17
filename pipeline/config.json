@@ -49,17 +49,14 @@
       "wfs": "https://avoin.metsakeskus.fi/rajapinnat/v1/forestusedeclaration/ows",
       "typeName": "v1:forestusedeclaration",
       "practices": [
+        1,
         4,
         5,
-        6,
-        7,
         8,
         9,
-        17,
-        19
+        17
       ],
       "purposes": [
-        3,
         5,
         6
       ],

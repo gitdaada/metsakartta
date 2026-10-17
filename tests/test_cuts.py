@@ -8,7 +8,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 import cuts  # noqa: E402
 
-CFG = {"practices": [4, 5, 6, 7, 8, 9, 17, 19], "purposes": [3, 5, 6], "skipStates": ["32", "33", "34"], "validYears": 3}
+CFG = {"practices": [1, 4, 5, 8, 9, 17], "purposes": [5, 6], "skipStates": ["32", "33", "34"], "validYears": 3}
 
 
 def test_dates():
@@ -26,6 +26,11 @@ def test_declarations():
     assert ok and d == "2024-05-30" and kind == "Avohakkuu"
     # harvennus ei kelpaa, vaikka tarkoitus olisi tuhoalue
     assert not cuts.declaration_relevant(dict(base, CUTTINGREALIZATIONPRACTICE=3, CUTTINGPURPOSE=6), CFG, since)[0]
+    # suojuspuu- ja verhopuuhakkuussa metsää jää pystyyn: ei kelpaa, vaikka tarkoitus on uudistushakkuu
+    assert not cuts.declaration_relevant(dict(base, CUTTINGREALIZATIONPRACTICE=7, CUTTINGPURPOSE=3), CFG, since)[0]
+    assert not cuts.declaration_relevant(dict(base, CUTTINGREALIZATIONPRACTICE=6, CUTTINGPURPOSE=3), CFG, since)[0]
+    # siemenpuuhakkuu kelpaa
+    assert cuts.declaration_relevant(dict(base, CUTTINGREALIZATIONPRACTICE=8, CUTTINGPURPOSE=3), CFG, since)[2] == "Siemenpuuhakkuu"
     # myrskytuhoalue (21) tuhoalueena kelpaa
     assert cuts.declaration_relevant(dict(base, CUTTINGREALIZATIONPRACTICE=21, CUTTINGPURPOSE=6), CFG, since)[0]
     # vanhentunut ennen MVMI:tä
