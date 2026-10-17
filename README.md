@@ -57,6 +57,12 @@ Tiedot päivittyvät viikoittain maanantaiaamuisin. Tason saa piiloon *Karttatas
 
 MVMI on satelliittikuviin ja koealoihin perustuva arvio. Yksittäisen ruudun arvo voi poiketa todellisuudesta, mutta laajempien kuvioiden yleiskuva on luotettavampi. Aineisto kuvaa tilannetta vuonna 2023, joten sen jälkeiset hakkuut eivät näy. Ne erottuvat vaihtamalla pohjaksi ilmakuvan.
 
+## Lisenssi
+
+Sovelluksen koodi on lisensoitu GNU GPL v3 -lisenssillä ([LICENSE](LICENSE)). Koodia saa käyttää, muuttaa ja jakaa, kunhan muutettu versio jaetaan samoilla ehdoilla lähdekoodin kanssa. Kartan kääntöön käytettävä leaflet-rotate on samalla lisenssillä, Leaflet BSD-2-lisenssillä.
+
+Karttadata (`docs/data/`) on johdettu avoimista aineistoista. Niiden lisenssit (CC BY 4.0) on lueteltu kohdassa *Tietolähteet ja lisenssit*.
+
 ## Tietosuoja
 
 - GPS-sijainti käsitellään puhelimen selaimessa. Tarkkaa sijaintia ei lähetetä minnekään.
