@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avoin-karttakuva.maanmittauslaitos.fi https://tile.openstreetmap.org; connect-src 'self' https://avoin-karttakuva.maanmittauslaitos.fi https://opendata.fmi.fi https://api.open-meteo.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avoin-karttakuva.maanmittauslaitos.fi https://tile.openstreetmap.org; connect-src 'self' https://avoin-karttakuva.maanmittauslaitos.fi https://opendata.fmi.fi https://api.open-meteo.com https://api.met.no; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>Metsäkartta</title>
   <meta name="description" content="Offline-kartta metsän iästä Metsähallituksen lupa-alueilla">
@@ -52,6 +52,18 @@
       <button id="zoomOutBtn" class="fab fab-sq" type="button" aria-label="Loitonna"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
     </div>
   </nav>
+
+  <section id="rainBar" class="rain-bar" hidden aria-label="Sade-ennuste">
+    <div class="rain-top">
+      <button id="rainPlay" class="rain-btn" type="button" aria-label="Toista sade-ennuste"></button>
+      <input id="rainSlider" type="range" min="0" max="0" step="1" value="0" aria-label="Ennusteaika">
+      <button id="rainNow" class="rain-now" type="button">Nyt</button>
+      <button id="rainHide" class="rain-btn" type="button" aria-label="Piilota sadetaso">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="rain-info"><b id="rainTime">Sade</b> <span id="rainHere"></span></div>
+  </section>
 
   <section id="infoCard" class="info-card" hidden aria-live="polite"></section>
 

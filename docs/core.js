@@ -313,6 +313,116 @@
     return bd <= 90 * 60 * 1000 ? best : null;
   }
 
+  // --- Sade (MET Norway Nowcast) -----------------------------------------------
+
+  function round4(v) { return Math.round(v * 1e4) / 1e4; }
+
+  /** n x n -pisteruudukko ±halfKm keskipisteen ympärillä. Keskipiste pyöristetään ~1 km tarkkuuteen. */
+  function rainGrid(lat, lon, halfKm, n) {
+    var cLat = Math.round(lat * 100) / 100, cLon = Math.round(lon * 50) / 50; // 0,01° lat ≈ 1,1 km, 0,02° lon ≈ 1,1 km (60–70° N)
+    var dLat = halfKm / 111.32, dLon = halfKm / (111.32 * Math.cos(cLat * Math.PI / 180));
+    var pts = [];
+    for (var j = 0; j < n; j++) {      // j = rivi pohjoisesta etelään
+      for (var i = 0; i < n; i++) {    // i = sarake lännestä itään
+        var fy = n > 1 ? j / (n - 1) : 0.5, fx = n > 1 ? i / (n - 1) : 0.5;
+        pts.push({ i: i, j: j, lat: round4(cLat + dLat - 2 * dLat * fy), lon: round4(cLon - dLon + 2 * dLon * fx) });
+      }
+    }
+    return { center: [cLat, cLon], bounds: [[round4(cLat - dLat), round4(cLon - dLon)], [round4(cLat + dLat), round4(cLon + dLon)]], points: pts, n: n };
+  }
+
+  /** MET Nowcast 2.0 -vastaus -> {coverage, series: [{t, r}]} (r = mm/h tai null). */
+  function parseNowcast(j) {
+    var p = j && j.properties;
+    if (!p || !Array.isArray(p.timeseries)) throw new Error('MET: odottamaton vastaus');
+    var cov = (p.meta && p.meta.radar_coverage) || 'unknown';
+    var series = [];
+    p.timeseries.forEach(function (e) {
+      var t = Date.parse(e.time);
+      var d = e.data && e.data.instant && e.data.instant.details;
+      if (!isFinite(t)) return;
+      series.push({ t: t, r: d ? cleanNum(d.precipitation_rate) : null });
+    });
+    return { coverage: String(cov), series: series };
+  }
+
+  /** Yhdistää pisteiden aikasarjat kehyksiksi: times[k], frames[k][j*n+i] (mm/h tai null). */
+  function rainFrames(results, n) {
+    var tset = {};
+    results.forEach(function (r) { if (r) r.series.forEach(function (e) { tset[e.t] = 1; }); });
+    var times = Object.keys(tset).map(Number).sort(function (a, b) { return a - b; });
+    var idx = {};
+    times.forEach(function (t, k) { idx[t] = k; });
+    var frames = times.map(function () { var f = new Array(n * n); for (var q = 0; q < f.length; q++) f[q] = null; return f; });
+    results.forEach(function (r, pi) {
+      if (!r) return;
+      r.series.forEach(function (e) { if (e.r !== null) frames[idx[e.t]][pi] = e.r; });
+    });
+    return { times: times, frames: frames };
+  }
+
+  // Sateen värit: syaani -> keltainen -> oranssi (punainen, vihreä, sininen ja violetti ovat jo käytössä).
+  var RAIN_STOPS = [
+    [0.1, [165, 243, 252, 0.35]],
+    [0.5, [34, 211, 238, 0.45]],
+    [2, [253, 224, 71, 0.55]],
+    [5, [251, 146, 60, 0.64]],
+    [10, [234, 88, 12, 0.72]]
+  ];
+  function rainColor(r) {
+    if (r === null || r === undefined || !(r >= RAIN_STOPS[0][0])) return null;
+    for (var k = RAIN_STOPS.length - 1; k >= 0; k--) {
+      if (r >= RAIN_STOPS[k][0]) {
+        if (k === RAIN_STOPS.length - 1) return RAIN_STOPS[k][1].slice();
+        var a = RAIN_STOPS[k], b = RAIN_STOPS[k + 1], f = (r - a[0]) / (b[0] - a[0]);
+        return [lerp(a[1][0], b[1][0], f), lerp(a[1][1], b[1][1], f), lerp(a[1][2], b[1][2], f), a[1][3] + (b[1][3] - a[1][3]) * f];
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Piirtää kehyksen size x size RGBA-kuvaksi: bilineaarinen interpolointi ruudukon pisteiden välillä,
+   * pyöreä rajaus ja pehmeä reuna. Puuttuvat arvot tulkitaan nollaksi.
+   */
+  function renderRain(frame, n, size, out) {
+    var data = out || new Uint8ClampedArray(size * size * 4), any = false;
+    for (var y = 0; y < size; y++) {
+      for (var x = 0; x < size; x++) {
+        var o = (y * size + x) * 4;
+        var u = (x + 0.5) / size, v = (y + 0.5) / size;
+        var dx = u - 0.5, dy = v - 0.5, rr = Math.sqrt(dx * dx + dy * dy) * 2; // 0 keskellä, 1 ympyrän reunalla
+        if (rr >= 1) { data[o + 3] = 0; continue; }
+        var gx = u * (n - 1), gy = v * (n - 1);
+        var i0 = Math.min(n - 2, Math.floor(gx)), j0 = Math.min(n - 2, Math.floor(gy));
+        var fx = gx - i0, fy = gy - j0;
+        var g = function (i, j) { var val = frame[j * n + i]; return val === null || val === undefined ? 0 : val; };
+        var r = g(i0, j0) * (1 - fx) * (1 - fy) + g(i0 + 1, j0) * fx * (1 - fy) + g(i0, j0 + 1) * (1 - fx) * fy + g(i0 + 1, j0 + 1) * fx * fy;
+        var c = rainColor(r);
+        if (!c) { data[o + 3] = 0; continue; }
+        var edge = rr > 0.82 ? Math.max(0, (1 - rr) / 0.18) : 1;
+        data[o] = c[0]; data[o + 1] = c[1]; data[o + 2] = c[2]; data[o + 3] = Math.round(255 * c[3] * edge);
+        any = true;
+      }
+    }
+    return { data: data, any: any };
+  }
+
+  /** Lyhyt yhteenveto yhden pisteen sarjasta: sataako nyt, milloin alkaa tai loppuu. */
+  function rainSummary(series, now) {
+    var s = (series || []).filter(function (e) { return e.t >= now - 5 * 60000; });
+    if (!s.length) return null;
+    var wet = function (e) { return e.r !== null && e.r >= 0.1; };
+    var max = 0; s.forEach(function (e) { if (e.r !== null && e.r > max) max = e.r; });
+    if (wet(s[0])) {
+      var stop = null;
+      for (var k = 1; k < s.length; k++) if (!wet(s[k])) { stop = s[k].t; break; }
+      return { state: 'raining', rate: s[0].r, until: stop, max: max };
+    }
+    for (var m = 1; m < s.length; m++) if (wet(s[m])) return { state: 'coming', at: s[m].t, rate: s[m].r, max: max };
+    return { state: 'dry', max: max };
+  }
+
   /** Tiilen välimuistiavain ilman api-avainta: sama tiili säilyy, vaikka avain vaihtuu. */
   function tileCacheKey(url) {
     var q = url.indexOf('?');
@@ -328,6 +438,8 @@
     describe: describe, stats: stats, geometryContains: geometryContains, tileCacheKey: tileCacheKey,
     norm360: norm360, windFromName: windFromName, windToName: windToName, fanHalfAngle: fanHalfAngle,
     destPoint: destPoint, fanBand: fanBand, parseFmiWind: parseFmiWind, parseOpenMeteoWind: parseOpenMeteoWind,
-    pickWind: pickWind
+    pickWind: pickWind,
+    rainGrid: rainGrid, parseNowcast: parseNowcast, rainFrames: rainFrames, rainColor: rainColor,
+    renderRain: renderRain, rainSummary: rainSummary, RAIN_STOPS: RAIN_STOPS
   };
 })(typeof self !== 'undefined' ? self : this);

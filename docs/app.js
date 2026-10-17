@@ -30,7 +30,7 @@
   var DEFAULTS = {
     apiKey: '', basemap: 'maastokartta', oldAge: 80, taimikkoM: 7, treelessM: 0.5, maxZoom: 16, offlineOrtho: false,
     wakeLock: false, opacity: 0.7, showForest: true, showProtected: true, showMask: true, gpsOn: false,
-    showWind: true, fanLengthM: 200,
+    showWind: true, fanLengthM: 200, showRain: true,
     mmlBase: ''
   };
   function num(v, d, min, max) { v = Number(v); return isFinite(v) ? Math.max(min, Math.min(max, v)) : d; }
@@ -43,7 +43,7 @@
     s.treelessM = num(s.treelessM, DEFAULTS.treelessM, 0, 3);
     s.maxZoom = s.maxZoom === 15 ? 15 : 16;
     s.opacity = num(s.opacity, DEFAULTS.opacity, 0.2, 1);
-    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn', 'showWind'].forEach(function (k) { s[k] = !!s[k]; });
+    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn', 'showWind', 'showRain'].forEach(function (k) { s[k] = !!s[k]; });
     s.fanLengthM = [100, 200, 300, 500].indexOf(Number(s.fanLengthM)) >= 0 ? Number(s.fanLengthM) : DEFAULTS.fanLengthM;
     s.mmlBase = typeof s.mmlBase === 'string' ? s.mmlBase : '';
     return s;
@@ -127,6 +127,7 @@
   map.createPane('protCasingPane').style.zIndex = 410;
   map.createPane('protPane').style.zIndex = 420;
   map.createPane('boundaryPane').style.zIndex = 430;
+  map.createPane('rainPane').style.zIndex = 380;
   map.createPane('windPane').style.zIndex = 435;
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 
@@ -264,6 +265,7 @@
         '<li><span class="sw sw-dash"></span>Luonnonsuojelualue</li>' +
         '<li><span class="sw sw-line"></span>Lupa-alueen raja</li>' +
         (settings.showWind ? '<li><span class="sw sw-wind"></span>Tuuliviuhka (hajusi kulku)</li>' : '') +
+        (settings.showRain ? '<li><span class="sw sw-rain"></span><span>Sade 0–2 h<small>heikko → kova</small></span></li>' : '') +
         '</ul>';
       if (S.stats && S.stats.total) {
         var st = S.stats, forest = st.young + st.old;
@@ -504,6 +506,7 @@
     chip.className = 'chip chip-gps';
     chip.textContent = 'GPS ±' + fmtInt(acc) + ' m';
     drawWindFan();
+    refreshRain();
     if (S.firstFix || S.follow) {
       map.setView(ll, S.firstFix ? Math.max(map.getZoom(), 15) : map.getZoom(), { animate: !S.firstFix });
       S.firstFix = false;
@@ -859,13 +862,18 @@
     body.appendChild(h('h3', { text: 'Metsän ikä' }));
     body.appendChild(toggleRow('Näytä metsän ikä', null, settings.showForest, function (v) { settings.showForest = v; saveSettings(); applyLayerVisibility(); }));
     var range = h('input', { type: 'range', min: '0.2', max: '1', step: '0.05', value: String(settings.opacity), 'aria-label': 'Läpinäkyvyys' });
-    range.addEventListener('input', function () { settings.opacity = Number(range.value); forestLayer.setOpacity(settings.opacity); });
+    range.addEventListener('input', function () { settings.opacity = Number(range.value); applyForestOpacity(); });
     range.addEventListener('change', saveSettings);
     body.appendChild(h('div', { class: 'field' }, h('span', { class: 'label', text: 'Peittävyys' }), range));
 
     body.appendChild(h('h3', { text: 'Muut tasot' }));
     body.appendChild(toggleRow('Luonnonsuojelualueet', 'Katkoviiva', settings.showProtected, function (v) { settings.showProtected = v; saveSettings(); applyLayerVisibility(); }));
     body.appendChild(toggleRow('Himmennä lupa-alueen ulkopuoli', null, settings.showMask, function (v) { settings.showMask = v; saveSettings(); applyLayerVisibility(); }));
+    body.appendChild(toggleRow('Sade-ennuste 0–2 h', 'MET Norway · haetaan sijaintisi ympäriltä vain, kun sovellus on auki', settings.showRain, function (v) {
+      settings.showRain = v; saveSettings(); renderLegend();
+      if (v) refreshRain(true); else stopRainPlay();
+      updateRainUi();
+    }));
   }
 
   function toggleRow(label, hint, value, onChange) {
@@ -925,8 +933,11 @@
       '<p>Pohjakartta: © Maanmittauslaitos (CC BY 4.0) tai © OpenStreetMapin tekijät.</p>' +
       '<p>Metsätieto on satelliittikuviin perustuva arvio. Yksittäisen 16 m ruudun arvo voi poiketa todellisuudesta, mutta isompien kuvioiden yleiskuva on luotettavampi. ' +
       'Lupa-alueen raja on käsin piirretty: virallinen raja on eräluvat.fi:n kartassa.</p>' +
-      '<p>Tuuliennuste: Ilmatieteen laitos (CC BY 4.0), varalla Open-Meteo (CC BY 4.0).</p>' +
-      '<p>Sijaintisi käsitellään vain tässä laitteessa eikä sitä lähetetä minnekään. Tuuliennuste haetaan lupa-alueen keskipisteeseen, ei sijaintiisi.</p>' }));
+      '<p>Tuuliennuste: Ilmatieteen laitos (CC BY 4.0), varalla Open-Meteo (CC BY 4.0). Sade-ennuste: MET Norway (CC BY 4.0).</p>' +
+      '<p>Sijaintisi käsitellään tässä laitteessa. Tuuliennuste haetaan lupa-alueen keskipisteeseen. Kun sadetaso on päällä ja sovellus auki, ' +
+      'sijaintisi noin 1 km tarkkuudella (25 pisteen ruudukko 7,5 km säteellä) lähetetään MET Norwaylle sade-ennusteen hakua varten. ' +
+      'Sovellus ei hae mitään taustalla.</p>' +
+      '<p>Ohjelman lähdekoodi ja yhteystiedot: <a href="https://github.com/gitdaada/metsakartta" target="_blank" rel="noopener">github.com/gitdaada/metsakartta</a></p>' }));
   }
 
   function numberField(id, label, value, min, max, step, hint, set) {
@@ -979,10 +990,10 @@
   }
   function isoHour(ms) { var d = new Date(ms); d.setUTCMinutes(0, 0, 0); return d.toISOString().replace('.000Z', 'Z'); }
 
-  function fetchWithTimeout(url, ms) {
+  function fetchWithTimeout(url, ms, cacheMode) {
     var c = new AbortController();
     var t = setTimeout(function () { c.abort(); }, ms);
-    return fetch(url, { signal: c.signal, credentials: 'omit', cache: 'no-store' })
+    return fetch(url, { signal: c.signal, credentials: 'omit', cache: cacheMode || 'no-store' })
       .then(function (r) { clearTimeout(t); return r; }, function (e) { clearTimeout(t); throw e; });
   }
 
@@ -1337,6 +1348,220 @@
   window.addEventListener('online', function () { if (S.area) refreshWind(S.area); });
 
   // ---------------------------------------------------------------------------
+  // Sade: MET Norwayn tutkaennuste (nowcast) 0–2 h, 5 x 5 pisteen ruudukko ±7,5 km
+  // ---------------------------------------------------------------------------
+
+  var MET_NOWCAST = 'https://api.met.no/weatherapi/nowcast/2.0/complete';
+  var RAIN_HALF_KM = 7.5, RAIN_N = 5, RAIN_IMG = 72;
+  var RAIN_MAX_AGE = 5 * 60 * 1000, RAIN_MOVE_KM = 2.5, RAIN_MIN_GAP = 60 * 1000;
+  S.rain = null; S.rainLoading = false; S.rainIdx = 0; S.rainPlay = 0; S.rainPinned = false;
+  var rainCanvas = document.createElement('canvas');
+  rainCanvas.width = rainCanvas.height = RAIN_IMG;
+
+  function hm(ms) { return new Date(ms).toLocaleTimeString('fi-FI', { hour: '2-digit', minute: '2-digit' }); }
+
+  function rainCenter() {
+    if (S.pos) return { lat: S.pos.coords.latitude, lon: S.pos.coords.longitude, gps: true };
+    var c = map.getCenter();
+    return { lat: c.lat, lon: c.lng, gps: false };
+  }
+
+  /** Hakuja tehdään vain, kun sadetaso on päällä, verkko on käytössä ja sovellus on näkyvissä. */
+  function canFetchRain() { return settings.showRain && navigator.onLine && document.visibilityState === 'visible'; }
+
+  function refreshRain(force) {
+    if (!canFetchRain() || S.rainLoading) return Promise.resolve(false);
+    var c = rainCenter();
+    var grid = MK.rainGrid(c.lat, c.lon, RAIN_HALF_KM, RAIN_N);
+    if (!force && S.rain) {
+      var age = Date.now() - S.rain.fetched;
+      var moved = map.distance(grid.center, S.rain.grid.center) > RAIN_MOVE_KM * 1000;
+      var gpsNow = c.gps && !S.rain.gps;
+      if (!(age > RAIN_MAX_AGE || gpsNow || (moved && age > RAIN_MIN_GAP))) return Promise.resolve(false);
+    }
+    S.rainLoading = true;
+    updateRainUi();
+    var results = new Array(grid.points.length), next = 0, failed = 0, covBad = 0;
+    function one(k) {
+      var p = grid.points[k];
+      return fetchWithTimeout(MET_NOWCAST + '?lat=' + p.lat + '&lon=' + p.lon, 15000, 'default').then(function (r) {
+        if (!r.ok) throw new Error('MET HTTP ' + r.status);
+        return r.json();
+      }).then(function (j) {
+        var res = MK.parseNowcast(j);
+        if (res.coverage !== 'ok') covBad++;
+        results[k] = res;
+      }).catch(function (e) {
+        failed++;
+        console.warn('Sade-ennusteen haku epäonnistui:', e && e.message);
+      });
+    }
+    // Kolme hakua kerrallaan ja pieni tauko: MET Norwayn kokonaisraja on 20 hakua sekunnissa.
+    function worker() {
+      if (next >= grid.points.length) return Promise.resolve();
+      var k = next++;
+      return one(k).then(function () { return wait(150); }).then(worker);
+    }
+    return Promise.all([worker(), worker(), worker()]).then(function () {
+      S.rainLoading = false;
+      if (failed === grid.points.length) {
+        updateRainUi();
+        if (force) toast('Sade-ennustetta ei saatu.');
+        return false;
+      }
+      var fr = MK.rainFrames(results, RAIN_N);
+      var mid = Math.floor(grid.points.length / 2);
+      S.rain = {
+        grid: grid, gps: c.gps, fetched: Date.now(), times: fr.times, frames: fr.frames,
+        center: results[mid] ? results[mid].series : [], coverageBad: covBad, failed: failed
+      };
+      buildRainImages();
+      S.rainPinned = false;
+      S.rainIdx = currentRainIdx();
+      updateRainUi();
+      return true;
+    });
+  }
+
+  function buildRainImages() {
+    var r = S.rain, ctx = rainCanvas.getContext('2d'), img = ctx.createImageData(RAIN_IMG, RAIN_IMG);
+    r.urls = []; r.has = []; r.anyRain = false;
+    r.frames.forEach(function (f) {
+      var out = MK.renderRain(f, RAIN_N, RAIN_IMG, img.data);
+      ctx.putImageData(img, 0, 0);
+      r.urls.push(rainCanvas.toDataURL('image/png'));
+      r.has.push(out.any);
+      if (out.any) r.anyRain = true;
+    });
+  }
+
+  function currentRainIdx() {
+    var r = S.rain, now = Date.now();
+    if (!r || !r.times.length) return 0;
+    for (var k = 0; k < r.times.length; k++) if (r.times[k] >= now - 150000) return k;
+    return -1;
+  }
+
+  function rainExpired() {
+    var r = S.rain;
+    return !r || !r.times.length || r.times[r.times.length - 1] < Date.now() - 5 * 60000;
+  }
+
+  function applyForestOpacity() {
+    var dim = !!(S.layers.rain && S.rain && S.rain.anyRain);
+    forestLayer.setOpacity(settings.opacity * (dim ? 0.75 : 1));
+  }
+
+  function drawRain() {
+    var r = S.rain, k = S.rainIdx;
+    var show = settings.showRain && r && r.urls && !rainExpired() && k >= 0 && k < r.urls.length && r.anyRain;
+    if (!show) {
+      if (S.layers.rain) { map.removeLayer(S.layers.rain); S.layers.rain = null; }
+    } else if (!S.layers.rain) {
+      S.layers.rain = L.imageOverlay(r.urls[k], r.grid.bounds, { pane: 'rainPane', interactive: false, className: 'rain-img' }).addTo(map);
+    } else {
+      S.layers.rain.setBounds(L.latLngBounds(r.grid.bounds));
+      S.layers.rain.setUrl(r.urls[k]);
+    }
+    applyForestOpacity();
+  }
+
+  function rainHereText(r) {
+    var who = r.gps ? 'Kohdallasi' : 'Kartan keskellä';
+    var sm = MK.rainSummary(r.center, Date.now());
+    if (!r.anyRain) return 'Ei sadetta 7,5 km säteellä seuraavan 2 h aikana.';
+    if (!sm) return '';
+    if (sm.state === 'raining') return who + ' sataa nyt' + (sm.until ? ', taukoa n. klo ' + hm(sm.until) : '') + '.';
+    if (sm.state === 'coming') return who + ' sade alkaa n. klo ' + hm(sm.at) + '.';
+    return who + ' ei sada, lähistöllä sadetta.';
+  }
+
+  /** Nostaa oikean reunan painikkeet sadepalkin yläpuolelle, jos palkki ulottuu niiden alle. */
+  function liftFabs() {
+    var bar = $('rainBar'), fabs = document.querySelector('.fabs'), lift = 0;
+    if (bar && fabs && !bar.hidden) {
+      var b = bar.getBoundingClientRect(), f = fabs.getBoundingClientRect();
+      if (b.right > f.left - 4) lift = Math.ceil(window.innerHeight - b.top + 10);
+    }
+    document.documentElement.style.setProperty('--fab-lift', lift + 'px');
+  }
+  window.addEventListener('resize', liftFabs);
+
+  function updateRainUi() {
+    var bar = $('rainBar'), slider = $('rainSlider'), play = $('rainPlay'), timeEl = $('rainTime'), here = $('rainHere');
+    try { return updateRainUiInner(bar, slider, play, timeEl, here); } finally { liftFabs(); }
+  }
+
+  function updateRainUiInner(bar, slider, play, timeEl, here) {
+    if (!settings.showRain) { bar.hidden = true; stopRainPlay(); drawRain(); return; }
+    bar.hidden = false;
+    var r = S.rain;
+    if (!r || rainExpired()) {
+      slider.disabled = true; play.disabled = true; slider.max = '0'; slider.value = '0';
+      timeEl.textContent = 'Sade';
+      here.textContent = S.rainLoading ? 'Haetaan sade-ennustetta…' :
+        (!navigator.onLine ? 'Sade-ennuste vaatii verkkoyhteyden.' : (r ? 'Sade-ennuste vanhentui, päivitetään…' : 'Ei vielä sadetietoa.'));
+      drawRain();
+      return;
+    }
+    if (!S.rainPinned && !S.rainPlay) S.rainIdx = Math.max(0, currentRainIdx());
+    S.rainIdx = Math.max(0, Math.min(S.rainIdx, r.times.length - 1));
+    slider.max = String(r.times.length - 1);
+    slider.value = String(S.rainIdx);
+    slider.disabled = !r.anyRain;
+    play.disabled = !r.anyRain;
+    var t = r.times[S.rainIdx], mins = Math.round((t - Date.now()) / 60000);
+    timeEl.textContent = (mins <= 2 ? 'Nyt' : '+' + mins + ' min') + ' · klo ' + hm(t);
+    here.textContent = rainHereText(r) + (r.coverageBad ? ' Tutkakattavuus osin heikko.' : '') +
+      (S.rainLoading ? ' Päivitetään…' : ' Päivitetty klo ' + hm(r.fetched) + '.');
+    drawRain();
+  }
+
+  function setPlayIcon(playing) {
+    $('rainPlay').innerHTML = playing ?
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>' :
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg>';
+    $('rainPlay').setAttribute('aria-label', playing ? 'Pysäytä' : 'Toista sade-ennuste');
+  }
+  function startRainPlay() {
+    if (S.rainPlay || !S.rain || !S.rain.times.length) return;
+    S.rainPinned = true;
+    S.rainPlay = setInterval(function () {
+      var r = S.rain;
+      if (!r || rainExpired()) { stopRainPlay(); return; }
+      S.rainIdx = (S.rainIdx + 1) % r.times.length;
+      updateRainUi();
+    }, 450);
+    setPlayIcon(true);
+  }
+  function stopRainPlay() {
+    if (S.rainPlay) clearInterval(S.rainPlay);
+    S.rainPlay = 0;
+    setPlayIcon(false);
+  }
+
+  $('rainSlider').addEventListener('input', function () {
+    stopRainPlay();
+    S.rainPinned = true;
+    S.rainIdx = Number($('rainSlider').value);
+    updateRainUi();
+  });
+  $('rainPlay').addEventListener('click', function () { if (S.rainPlay) stopRainPlay(); else startRainPlay(); });
+  $('rainNow').addEventListener('click', function () { stopRainPlay(); S.rainPinned = false; updateRainUi(); });
+  $('rainHide').addEventListener('click', function () {
+    settings.showRain = false; saveSettings(); renderLegend(); updateRainUi();
+    toast('Sadetaso piilotettu. Saat sen takaisin Karttatasot-valikosta.');
+  });
+
+  // Päivitys vain sovelluksen ollessa auki: minuutin välein tarkistus (haku itse rajoittaa tiheyden).
+  setInterval(function () { refreshRain(); updateRainUi(); }, 60000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') refreshRain(); else stopRainPlay();
+  });
+  window.addEventListener('online', function () { refreshRain(); });
+  map.on('moveend', function () { if (!S.pos) refreshRain(); });
+
+  // ---------------------------------------------------------------------------
   // Verkon tila ja service worker
   // ---------------------------------------------------------------------------
 
@@ -1375,9 +1600,13 @@
     if (stale.length && navigator.onLine) toast('Karttapäivitys saatavilla: ' + stale.map(function (a) { return a.name; }).join(', '),
       { label: 'Näytä', fn: function () { openSheet('areas', 'Lupa-alueet', renderAreasSheet); } });
     if (settings.gpsOn) startWatch();
+    setPlayIcon(false);
+    updateRainUi();
+    // Jos GPS on päällä, ensimmäinen sadehaku tehdään sijainnin mukaan (onPos); muuten kartan keskeltä.
+    if (settings.gpsOn) setTimeout(function () { refreshRain(); }, 8000); else refreshRain();
   });
 
   // Testejä varten
   window.__mk = { S: S, settings: settings, map: map, selectArea: selectArea, offline: function () { return offline; },
-    refreshWind: refreshWind, currentWind: currentWind };
+    refreshWind: refreshWind, currentWind: currentWind, refreshRain: refreshRain };
 })();

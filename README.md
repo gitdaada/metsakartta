@@ -11,10 +11,13 @@ Offline-toimiva karttasovellus metsästykseen: näyttää Metsähallituksen lupa
 | Keltainen katkoviiva | Luonnonsuojelualue |
 | Musta viiva | Lupa-alueen raja |
 | Violetti viuhka | Tuulen mukana kulkeva hajusi (oma sijainti → myötätuuleen) |
+| Syaani → keltainen → oranssi | Sade-ennuste: heikko → kohtalainen → voimakas sade |
 
 Napauttamalla karttaa näet ruudun arvioidun iän ja pituuden, mahdollisen suojelualueen sekä etäisyyden omasta sijainnistasi.
 
 **Tuuli:** sovellus hakee alueelle tuulen tuntiennusteen (n. 60 h) ja tallentaa sen puhelimeen, joten tuuliviuhka toimii myös ilman verkkoa. Tuulipainikkeesta näet ennusteen ja voit asettaa suunnan itse oman havainnon mukaan (savu, lumi, heinä). Viuhka on sitä leveämpi, mitä heikompi tuuli, koska heikon tuulen suunta on epävarma.
+
+**Sade:** sovellus näyttää sadetutkaan perustuvan ennusteen seuraavalle noin kahdelle tunnille 15 km:n alueelta sijaintisi ympäriltä (ilman GPS:ää kartan keskeltä). Aikaliukusäätimellä ja toistopainikkeella näet, miten sade liikkuu. *Nyt* palauttaa nykyhetkeen. Palkin alaosassa kerrotaan, sataako kohdallasi tai milloin sade alkaa. Ennuste päivittyy viiden minuutin välein, kun sovellus on auki, ja se vaatii verkkoyhteyden. Tason saa piiloon palkin ×-painikkeesta tai *Karttatasot*-valikosta.
 
 ## Käyttöönotto
 
@@ -36,6 +39,7 @@ Napauttamalla karttaa näet ruudun arvioidun iän ja pituuden, mahdollisen suoje
 - Metsätieto: Luonnonvarakeskus, monilähteinen valtakunnan metsien inventointi (MVMI) 2023, CC BY 4.0.
 - Luonnonsuojelualueet: Syke / Metsähallitus, CC BY 4.0.
 - Tuuliennuste: Ilmatieteen laitos, avoin data (CC BY 4.0). Varalla Open-Meteo (CC BY 4.0, ilmainen vain ei-kaupalliseen käyttöön).
+- Sade-ennuste: MET Norway, Nowcast 2.0 (CC BY 4.0). Ennuste perustuu sadetutkahavaintoihin.
 - Pohjakartta: Maanmittauslaitos, CC BY 4.0 (tai OpenStreetMap ilman API-avainta, vain verkossa).
 - Kirjasto: Leaflet 1.9.4 (BSD-2).
 
@@ -43,8 +47,9 @@ MVMI on satelliittikuviin ja koealoihin perustuva arvio. Yksittäisen ruudun arv
 
 ## Tietosuoja
 
-- Sijaintia ei lähetetä minnekään. Se käsitellään vain puhelimen selaimessa.
+- GPS-sijainti käsitellään puhelimen selaimessa. Tarkkaa sijaintia ei lähetetä minnekään.
 - Tuuliennuste haetaan lupa-alueen keskipisteeseen (pyöristettynä), ei käyttäjän sijaintiin.
+- Sade-ennustetta varten MET Norwaylle lähetetään 25 pisteen ruudukko enintään 7,5 km:n päästä sijainnista. Ruudukon keskipiste on pyöristetty noin 1 km:n tarkkuuteen. Haku tehdään vain, kun sovellus on auki ja näkyvissä ja sadetaso on päällä, ei koskaan taustalla. Sadetason pois kytkeminen lopettaa haut kokonaan.
 - Sovelluksessa ei ole kirjautumista, analytiikkaa eikä palvelinta.
 - Repo on julkinen. Siitä näkyvät sovelluksen koodi ja lupa-alueiden rajat.
 

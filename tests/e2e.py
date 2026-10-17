@@ -95,6 +95,33 @@ def handle_fmi(route):
         route.fulfill(status=200, headers=hdr, content_type="text/xml", body=fmi_xml())
 
 
+MET_CALLS = []
+
+
+def met_json(lat, lon):
+    import datetime as dt, math
+    now = dt.datetime.now(dt.timezone.utc)
+    t0 = now.replace(second=0, microsecond=0) + dt.timedelta(minutes=5 - now.minute % 5)
+    ts = []
+    for k in range(24):
+        clon = 24.96 + 0.008 * k                      # sadesolu liikkuu lännestä itään
+        r = 3.0 * math.exp(-(((lon - clon) / 0.02) ** 2 + ((lat - 61.24) / 0.03) ** 2))
+        d = {"precipitation_rate": round(r, 1)}
+        if k == 0:
+            d["air_temperature"] = 6.0
+        ts.append({"time": (t0 + dt.timedelta(minutes=5 * k)).strftime("%Y-%m-%dT%H:%M:%SZ"), "data": {"instant": {"details": d}}})
+    return json.dumps({"type": "Feature", "geometry": {"type": "Point", "coordinates": [lon, lat, 100]},
+                       "properties": {"meta": {"updated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "radar_coverage": "ok"}, "timeseries": ts}})
+
+
+def handle_met(route):
+    from urllib.parse import urlparse, parse_qs
+    q = parse_qs(urlparse(route.request.url).query)
+    MET_CALLS.append((q["lat"][0], q["lon"][0]))
+    route.fulfill(status=200, headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "max-age=60"},
+                  content_type="application/json", body=met_json(float(q["lat"][0]), float(q["lon"][0])))
+
+
 def handle_om(route):
     WIND_CALLS.append(route.request.url)
     route.fulfill(status=200, headers={"Access-Control-Allow-Origin": "*"}, content_type="application/json", body=om_json())
@@ -115,6 +142,7 @@ def main():
         """)
         ctx.route("https://opendata.fmi.fi/**", handle_fmi)
         ctx.route("https://api.open-meteo.com/**", handle_om)
+        ctx.route("https://api.met.no/**", handle_met)
         page = ctx.new_page()
         page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}") if m.type in ("error", "warning") else None)
         page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
@@ -224,6 +252,46 @@ def main():
         FMI_MODE["mode"] = "ok"
         page.evaluate("window.__mk.refreshWind(window.__mk.S.area, {force: true})")
         page.wait_for_function("() => window.__mk.S.wind.source === 'fmi'")
+
+        # Sade: MET Norwayn tutkaennuste sijainnin ympäriltä
+        page.wait_for_function("() => window.__mk.S.rain && window.__mk.S.rain.gps && !window.__mk.S.rainLoading", timeout=30000)
+        decs = max(len(v.split(".")[1]) if "." in v else 0 for c in MET_CALLS for v in c)
+        rain = page.evaluate("""() => { const r = window.__mk.S.rain; return { n: r.grid.points.length, center: r.grid.center,
+          steps: r.times.length, any: r.anyRain, overlay: !!window.__mk.S.layers.rain }; }""")
+        print("SADE:", rain, "hakuja", len(MET_CALLS), "desimaaleja max", decs)
+        assert rain["n"] == 25 and rain["steps"] == 24 and rain["any"] and rain["overlay"] and decs <= 4, rain
+        assert rain["center"] == [61.24, 25.08], rain                     # pyöristetty ~1 km
+        assert len(MET_CALLS) <= 50, len(MET_CALLS)
+        here = page.inner_text("#rainHere")
+        print("SADE KOHDALLA:", page.inner_text("#rainTime"), "|", here)
+        assert "Kohdallasi sade alkaa" in here, here
+        page.screenshot(path=str(SHOTS / "15-sade-nyt.png"))
+        u0 = page.evaluate("window.__mk.S.layers.rain._url")
+        page.evaluate("""() => { const s = document.getElementById('rainSlider'); s.value = '15'; s.dispatchEvent(new Event('input', {bubbles:true})); }""")
+        u15 = page.evaluate("window.__mk.S.layers.rain._url")
+        assert u0 != u15 and "+" in page.inner_text("#rainTime"), page.inner_text("#rainTime")
+        print("SADE +75 MIN:", page.inner_text("#rainTime"))
+        page.screenshot(path=str(SHOTS / "16-sade-75min.png"))
+        page.click("#rainNow")
+        # Sadepalkin painikkeet eivät jää oikean reunan painikkeiden alle
+        covered = page.evaluate("""() => ['rainPlay', 'rainNow', 'rainHide', 'rainSlider'].filter(id => {
+          const el = document.getElementById(id), b = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+          return !(hit && (hit === el || el.contains(hit))); })""")
+        fab_gap = page.evaluate("""() => document.getElementById('rainBar').getBoundingClientRect().top -
+          document.querySelector('.fabs').getBoundingClientRect().bottom""")
+        print("SADEPALKKI: peitossa", covered, "rako painikkeisiin", round(fab_gap), "px")
+        assert not covered and fab_gap >= 4, (covered, fab_gap)
+        # Piilotus: taso pois ja uusia hakuja ei tehdä
+        n_calls = len(MET_CALLS)
+        page.click("#rainHide")
+        page.evaluate("window.__mk.refreshRain(true)")
+        page.wait_for_timeout(500)
+        assert page.evaluate("!window.__mk.S.layers.rain") and page.is_hidden("#rainBar") and len(MET_CALLS) == n_calls
+        page.click("#layersBtn")
+        page.click("text=Sade-ennuste 0–2 h")
+        page.wait_for_function("() => window.__mk.S.layers.rain && !window.__mk.S.rainLoading", timeout=30000)
+        page.click("#sheetClose")
 
         # Offline-tallennus
         page.click("#areaBtn")
