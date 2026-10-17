@@ -430,13 +430,13 @@ def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, heigh
     from rasterio.transform import from_origin
     from rasterio.warp import reproject, Resampling
     from pyproj import Transformer
+    import shapely
     from shapely.geometry import mapping
-    from shapely.ops import transform as shp_transform
 
     poly_wgs, props = load_area_polygon(path)
     name = (props.get("nimi") or props.get("name") or props.get("Nimi") or "").strip() or name_from_stem(path.stem)
     to3067 = Transformer.from_crs("EPSG:4326", "EPSG:3067", always_xy=True).transform
-    poly = shp_transform(to3067, poly_wgs)
+    poly = shapely.transform(poly_wgs, lambda c: np.column_stack(to3067(c[:, 0], c[:, 1])))
     area_ha = poly.area / 10_000
     log(f"  {name}: {area_ha:,.0f} ha".replace(",", " "))
 
