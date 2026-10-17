@@ -1,10 +1,11 @@
 {
- "generated": "2026-10-15T17:20:03Z",
+ "generated": "2026-10-17T13:14:23Z",
  "encoding": 1,
  "mvmiYear": 2023,
  "attribution": [
   "Metsätieto: Luonnonvarakeskus, MVMI 2023 (CC BY 4.0)",
-  "Suojelualueet: Syke / Metsähallitus (CC BY 4.0)"
+  "Suojelualueet: Syke / Metsähallitus (CC BY 4.0)",
+  "Uudet hakkuut: Suomen metsäkeskus, latvusmalli ja metsänkäyttöilmoitukset (CC BY 4.0)"
  ],
  "areas": [
   {
@@ -15,8 +16,6 @@
     63.50493,
     26.13771
    ],
-   "version": "07daff243e98",
-   "bytes": 136226,
    "forest": {
     "width": 356,
     "height": 508,
@@ -41,13 +40,21 @@
      "sumR": 5164054,
      "sumG": 6198803
     },
-    "file": "data/jahti/forest.png?v=07daff243e98"
+    "file": "data/jahti/forest.png?v=2e4a36e57648"
    },
-   "boundary": "data/jahti/boundary.geojson?v=07daff243e98",
-   "protected": "data/jahti/protected.geojson?v=07daff243e98",
    "protectedCount": 2,
-   "built": "2026-10-15T17:20:03Z",
-   "srcHash": "01a35e6848ec",
+   "built": "2026-10-17T13:14:23Z",
+   "version": "2e4a36e57648",
+   "bytes": 216708,
+   "boundary": "data/jahti/boundary.geojson?v=2e4a36e57648",
+   "protected": "data/jahti/protected.geojson?v=2e4a36e57648",
+   "cuts": "data/jahti/cuts.geojson?v=2e4a36e57648",
+   "cutsCount": 32,
+   "declCount": 80,
+   "chmYears": [
+    2025
+   ],
+   "srcHash": "edb6c20a6f73",
    "source": "areas/jahti.json"
   },
   {
@@ -58,8 +65,6 @@
     61.237182,
     25.100735
    ],
-   "version": "77c3fa46a89a",
-   "bytes": 229685,
    "forest": {
     "width": 418,
     "height": 452,
@@ -84,13 +89,21 @@
      "sumR": 7899004,
      "sumG": 11829982
     },
-    "file": "data/0000-testialue/forest.png?v=77c3fa46a89a"
+    "file": "data/0000-testialue/forest.png?v=e5244d95f9f3"
    },
-   "boundary": "data/0000-testialue/boundary.geojson?v=77c3fa46a89a",
-   "protected": "data/0000-testialue/protected.geojson?v=77c3fa46a89a",
    "protectedCount": 13,
-   "built": "2026-10-15T16:47:26Z",
-   "srcHash": "dfb3c148f4d8",
+   "built": "2026-10-17T13:13:48Z",
+   "version": "e5244d95f9f3",
+   "bytes": 259360,
+   "boundary": "data/0000-testialue/boundary.geojson?v=e5244d95f9f3",
+   "protected": "data/0000-testialue/protected.geojson?v=e5244d95f9f3",
+   "cuts": "data/0000-testialue/cuts.geojson?v=e5244d95f9f3",
+   "cutsCount": 15,
+   "declCount": 17,
+   "chmYears": [
+    2025
+   ],
+   "srcHash": "bd0547f29f4c",
    "source": "areas/0000-testialue.geojson"
   }
  ]
