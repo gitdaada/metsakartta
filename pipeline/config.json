@@ -7,7 +7,10 @@
     ],
     "ageFile": "ika_vmi1x_1923.tif",
     "heightFile": "keskipituus_vmi1x_1923.tif",
-    "noDataCodes": [32766, 32767],
+    "noDataCodes": [
+      32766,
+      32767
+    ],
     "pixelSizeM": 16,
     "smoothWindow": 3
   },
@@ -22,9 +25,54 @@
         "url": "https://wwwd3.ymparisto.fi/d3/gis_data/spesific/luonnonsuojelualueet_yksityinen.zip"
       }
     ],
-    "skipFilesContaining": ["eramaa", "erämaa"],
-    "skipTypesContaining": ["erämaa"],
+    "skipFilesContaining": [
+      "eramaa",
+      "erämaa"
+    ],
+    "skipTypesContaining": [
+      "erämaa"
+    ],
     "bufferM": 500,
     "simplifyM": 1.0
+  },
+  "cuts": {
+    "enabled": true,
+    "minAreaHa": 0.3,
+    "chm": {
+      "urlTemplate": "https://avoin.metsakeskus.fi/aineistot/Latvusmalli/Karttalehti/{year}/CHM_{sheet}_{year}.tif",
+      "lowM": 3.0,
+      "minMvmiM": 8.0,
+      "minValid": 0.6,
+      "smoothM": 6
+    },
+    "declarations": {
+      "wfs": "https://avoin.metsakeskus.fi/rajapinnat/v1/forestusedeclaration/ows",
+      "typeName": "v1:forestusedeclaration",
+      "practices": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        17,
+        19
+      ],
+      "purposes": [
+        3,
+        5,
+        6
+      ],
+      "skipStates": [
+        "32",
+        "33",
+        "34"
+      ],
+      "validYears": 3,
+      "minForestM": 5.0,
+      "minForestFrac": 0.5,
+      "confirmFrac": 0.4,
+      "pageSize": 5000
+    }
   }
 }

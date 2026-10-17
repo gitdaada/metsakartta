@@ -7,6 +7,9 @@ on:
       - "areas/**"
       - "pipeline/**"
       - ".github/workflows/build-maps.yml"
+  # Viikoittain: uudet hakkuuilmoitukset ja latvusmallit (maanantaisin klo 6.17 Suomen kesäaikaa)
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
     inputs:
       force:

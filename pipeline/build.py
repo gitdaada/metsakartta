@@ -13,6 +13,8 @@ docs/data/<alue>/ -kansioon:
                      Sininen kanava (B):   ei käytössä (0)
   boundary.geojson   Lupa-alueen raja (WGS84)
   protected.geojson  Luonnonsuojelualueet alueella ja sen reunalla (WGS84)
+  cuts.geojson       MVMI:n jälkeen tehdyt hakkuut: latvusmallin aukot ja hakkuuilmoitukset (WGS84),
+                     ks. pipeline/cuts.py. Päivitetään jokaisella ajolla (viikoittain).
 
 sekä docs/data/areas.json -luettelon, jonka sovellus lukee.
 
@@ -40,6 +42,9 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cuts as cutsmod  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 AREAS_DIR = ROOT / "areas"
 OUT_DIR = ROOT / "docs" / "data"
@@ -52,6 +57,9 @@ USER_AGENT = "metsakartta-build/1.0 (+https://github.com)"
 
 FOREST_ATTRIBUTION = "Metsätieto: Luonnonvarakeskus, MVMI {year} (CC BY 4.0)"
 PROTECTED_ATTRIBUTION = "Suojelualueet: Syke / Metsähallitus (CC BY 4.0)"
+CUTS_ATTRIBUTION = "Uudet hakkuut: Suomen metsäkeskus, latvusmalli ja metsänkäyttöilmoitukset (CC BY 4.0)"
+DATA_FILES = (("forest", "forest.png"), ("boundary", "boundary.geojson"), ("protected", "protected.geojson"),
+              ("cuts", "cuts.geojson"))
 
 
 # ---------------------------------------------------------------------------
@@ -423,12 +431,9 @@ def load_area_polygon(path: Path):
     return poly, props
 
 
-def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, height_src: RasterSource,
-               protected: ProtectedAreas) -> dict:
-    import rasterio
+def read_area(path: Path, cfg: dict, age_src: RasterSource, height_src: RasterSource) -> dict:
+    """Lukee alueen rajauksen ja sen MVMI-ikkunan (ETRS-TM35FIN, 16 m), tasoitettuna."""
     from rasterio.features import geometry_mask
-    from rasterio.transform import from_origin
-    from rasterio.warp import reproject, Resampling
     from pyproj import Transformer
     import shapely
     from shapely.geometry import mapping
@@ -458,8 +463,78 @@ def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, heigh
         bad = np.isin(age, nod) | np.isin(height, nod) | (age < 0) | (height < 0)
         age = smooth_median(age, bad, k)
         height = smooth_median(height, bad, k)
+    inside = geometry_mask([mapping(poly)], out_shape=age.shape, transform=t_a, invert=True, all_touched=False)
+    valid = inside & ~(np.isin(age, nod) | np.isin(height, nod) | (age < 0) | (height < 0))
+    return {"poly_wgs": poly_wgs, "poly": poly, "name": name, "area_ha": area_ha, "age": age, "height": height,
+            "transform": t_a, "inside": inside, "valid": valid, "bounds": bounds}
+
+
+def build_cuts(A: dict, cfg: dict, out: Path, old_bytes: bytes | None) -> dict:
+    """Kirjoittaa cuts.geojson-tiedoston. Jos lähde ei vastaa, säilytetään edellinen tiedosto."""
+    path = out / "cuts.geojson"
+    if not cfg.get("cuts", {}).get("enabled", False):
+        path.write_text('{"type":"FeatureCollection","features":[]}', encoding="utf-8")
+        return {"latvusmalli": 0, "ilmoitus": 0}
+    fc, info = cutsmod.compute_cuts(A["poly"], A["height"], A["valid"], A["transform"], cfg["cuts"], cfg["mvmi"]["year"], log)
+    failed = "chmError" in info or "declError" in info
+    if failed and old_bytes:
+        log("  Käytetään edellisiä hakkuutietoja (lähde ei vastannut).")
+        path.write_bytes(old_bytes)
+        prev = json.loads(old_bytes.decode("utf-8"))
+        feats = prev.get("features", [])
+        return {"latvusmalli": sum(1 for f in feats if f["properties"].get("lahde") != "ilmoitus"),
+                "ilmoitus": sum(1 for f in feats if f["properties"].get("lahde") == "ilmoitus"), "stale": True}
+    path.write_text(json.dumps(fc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    return info
+
+
+def finish_entry(entry: dict, area_id: str, out: Path, info: dict) -> dict:
+    """Päivittää version, koon ja tiedostolinkit levyllä olevien tiedostojen mukaan."""
+    files = {k: (out / f).read_bytes() for k, f in DATA_FILES if (out / f).exists()}
+    version = sha1_bytes(*files.values())[:12]
+    entry["version"] = version
+    entry["bytes"] = sum(len(b) for b in files.values())
+    entry["forest"] = dict(entry["forest"], file=f"data/{area_id}/forest.png?v={version}")
+    entry["boundary"] = f"data/{area_id}/boundary.geojson?v={version}"
+    entry["protected"] = f"data/{area_id}/protected.geojson?v={version}"
+    if "cuts" in files:
+        entry["cuts"] = f"data/{area_id}/cuts.geojson?v={version}"
+        entry["cutsCount"] = int(info.get("latvusmalli", 0))
+        entry["declCount"] = int(info.get("ilmoitus", 0))
+        if info.get("chmYears"):
+            entry["chmYears"] = info["chmYears"]
+    return entry
+
+
+def refresh_cuts(prev: dict, path: Path, area_id: str, cfg: dict, age_src: RasterSource, height_src: RasterSource) -> dict:
+    """Päivittää ajan tasalla olevan alueen hakkuutiedot. Palauttaa uuden tai saman merkinnän."""
+    out = OUT_DIR / area_id
+    old_path = out / "cuts.geojson"
+    old_bytes = old_path.read_bytes() if old_path.exists() else None
+    A = read_area(path, cfg, age_src, height_src)
+    info = build_cuts(A, cfg, out, old_bytes)
+    if old_bytes is not None and old_path.read_bytes() == old_bytes and prev.get("cuts"):
+        log("  Hakkuutiedot ennallaan.")
+        return prev
+    entry = finish_entry(dict(prev), area_id, out, info)
+    entry["cutsUpdated"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    log(f"  Hakkuutiedot päivitetty, uusi versio {entry['version']}")
+    return entry
+
+
+def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, height_src: RasterSource,
+               protected: ProtectedAreas) -> dict:
+    from rasterio.transform import from_origin
+    from rasterio.warp import reproject, Resampling
+    from pyproj import Transformer
+    from shapely.geometry import mapping
+
+    A = read_area(path, cfg, age_src, height_src)
+    poly_wgs, poly, name, area_ha = A["poly_wgs"], A["poly"], A["name"], A["area_ha"]
+    age, height, t_a, inside, bounds = A["age"], A["height"], A["transform"], A["inside"], A["bounds"]
+    mv = cfg["mvmi"]
+    nod = mv["noDataCodes"]
     r, g = classify(age, height, nod)
-    inside = geometry_mask([mapping(poly)], out_shape=r.shape, transform=t_a, invert=True, all_touched=False)
     r[~inside] = 0
     g[~inside] = 0
     valid = r > 0
@@ -494,6 +569,7 @@ def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, heigh
     rr, gg, cx0, cy1 = cropped
 
     out = OUT_DIR / area_id
+    old_cuts = (out / "cuts.geojson").read_bytes() if (out / "cuts.geojson").exists() else None
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
@@ -514,24 +590,18 @@ def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, heigh
     (out / "protected.geojson").write_text(json.dumps(prot, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     log(f"  Suojelualueita: {len(prot['features'])}")
 
-    files = {k: (out / f).read_bytes() for k, f in
-             (("forest", "forest.png"), ("boundary", "boundary.geojson"), ("protected", "protected.geojson"))}
-    version = sha1_bytes(*files.values())[:12]
-    size = sum(len(b) for b in files.values())
+    info = build_cuts(A, cfg, out, old_cuts)
     lon_c, lat_c2 = poly_wgs.centroid.x, poly_wgs.centroid.y
-    return {
+    entry = {
         "id": area_id,
         "name": name,
         "areaHa": round(area_ha),
         "center": [round(lat_c2, 6), round(lon_c, 6)],
-        "version": version,
-        "bytes": size,
-        "forest": dict(meta, file=f"data/{area_id}/forest.png?v={version}"),
-        "boundary": f"data/{area_id}/boundary.geojson?v={version}",
-        "protected": f"data/{area_id}/protected.geojson?v={version}",
+        "forest": meta,
         "protectedCount": len(prot["features"]),
         "built": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    return finish_entry(entry, area_id, out, info)
 
 
 # ---------------------------------------------------------------------------
@@ -542,6 +612,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Rakentaa metsäkartat areas/-kansion rajauksista")
     ap.add_argument("--force", action="store_true", help="rakenna kaikki alueet uudelleen")
     ap.add_argument("--only", help="rakenna vain tämä alue (tiedostonimi ilman päätettä)")
+    ap.add_argument("--no-cuts", action="store_true", help="älä päivitä ajan tasalla olevien alueiden hakkuutietoja")
     args = ap.parse_args()
 
     cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -574,10 +645,21 @@ def main() -> int:
         src_hash = sha1_bytes(path.read_bytes(), cfg_bytes)[:12]
         prev = old.get(area_id)
         up_to_date = (prev and prev.get("srcHash") == src_hash and (OUT_DIR / area_id / "forest.png").exists())
-        if (args.only and args.only not in (area_id, path.stem)) or (up_to_date and not args.force):
+        if args.only and args.only not in (area_id, path.stem):
             if prev:
                 result.append(prev)
-                log(f"= {path.name}: ajan tasalla")
+            continue
+        if up_to_date and not args.force:
+            log(f"= {path.name}: metsäkartta ajan tasalla")
+            if args.no_cuts or not cfg.get("cuts", {}).get("enabled", False):
+                result.append(prev)
+                continue
+            try:
+                result.append(refresh_cuts(prev, path, area_id, cfg, age_src, height_src))
+            except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
+                log(f"::warning::Hakkuutietojen päivitys epäonnistui alueelle {path.name}: {exc}")
+                result.append(prev)
             continue
         log(f"> {path.name}")
         try:
@@ -603,7 +685,8 @@ def main() -> int:
         "generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "encoding": ENCODING_VERSION,
         "mvmiYear": cfg["mvmi"]["year"],
-        "attribution": [FOREST_ATTRIBUTION.format(year=cfg["mvmi"]["year"]), PROTECTED_ATTRIBUTION],
+        "attribution": [FOREST_ATTRIBUTION.format(year=cfg["mvmi"]["year"]), PROTECTED_ATTRIBUTION]
+                       + ([CUTS_ATTRIBUTION] if cfg.get("cuts", {}).get("enabled") else []),
         "areas": result,
     }
     # Jos mikään ei muuttunut, ei kosketa tiedostoon (vältetään turhat commitit ja ristiriidat).
