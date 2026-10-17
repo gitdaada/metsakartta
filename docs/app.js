@@ -30,7 +30,7 @@
   var DEFAULTS = {
     apiKey: '', basemap: 'maastokartta', oldAge: 80, taimikkoM: 7, treelessM: 0.5, maxZoom: 16, offlineOrtho: false,
     wakeLock: false, opacity: 0.7, showForest: true, showProtected: true, showMask: true, gpsOn: false,
-    showWind: true, fanLengthM: 200, showRain: true,
+    showWind: true, fanLengthM: 200, showRain: true, showCuts: true,
     mmlBase: ''
   };
   function num(v, d, min, max) { v = Number(v); return isFinite(v) ? Math.max(min, Math.min(max, v)) : d; }
@@ -43,7 +43,7 @@
     s.treelessM = num(s.treelessM, DEFAULTS.treelessM, 0, 3);
     s.maxZoom = s.maxZoom === 15 ? 15 : 16;
     s.opacity = num(s.opacity, DEFAULTS.opacity, 0.2, 1);
-    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn', 'showWind', 'showRain'].forEach(function (k) { s[k] = !!s[k]; });
+    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn', 'showWind', 'showRain', 'showCuts'].forEach(function (k) { s[k] = !!s[k]; });
     s.fanLengthM = [100, 200, 300, 500].indexOf(Number(s.fanLengthM)) >= 0 ? Number(s.fanLengthM) : DEFAULTS.fanLengthM;
     s.mmlBase = typeof s.mmlBase === 'string' ? s.mmlBase : '';
     return s;
@@ -56,7 +56,7 @@
 
   var S = {
     index: null, areas: [], area: null, forest: null, stats: null,
-    boundaryGJ: null, protectedGJ: null, layers: {}, base: null,
+    boundaryGJ: null, protectedGJ: null, cutsGJ: null, layers: {}, base: null,
     pos: null, watchId: null, follow: false, firstFix: true,
     wakeLock: null, dl: null, tapMarker: null, renderOpts: null
   };
@@ -119,16 +119,26 @@
   // Kartta
   // ---------------------------------------------------------------------------
 
-  var map = L.map('map', { zoomControl: false, maxZoom: 18, minZoom: 4, attributionControl: true, zoomSnap: 0.5 });
+  // Kartan voi kääntää kahdella sormella (leaflet-rotate). Pohjoinen palautetaan kompassipainikkeesta.
+  var CAN_ROTATE = typeof L.Map.prototype.setBearing === 'function';
+  var map = L.map('map', { zoomControl: false, maxZoom: 18, minZoom: 4, attributionControl: true, zoomSnap: 0.5,
+    rotate: CAN_ROTATE, touchRotate: CAN_ROTATE, shiftKeyRotate: CAN_ROTATE, rotateControl: false, compassBearing: false, bearing: 0 });
   map.attributionControl.setPrefix(false);
   map.setView(store.get('view', { c: [64.0, 26.5], z: 5 }).c, store.get('view', { c: [64.0, 26.5], z: 5 }).z);
-  map.createPane('maskPane').style.zIndex = 300;
-  map.createPane('forestPane').style.zIndex = 350;
-  map.createPane('protCasingPane').style.zIndex = 410;
-  map.createPane('protPane').style.zIndex = 420;
-  map.createPane('boundaryPane').style.zIndex = 430;
-  map.createPane('rainPane').style.zIndex = 380;
-  map.createPane('windPane').style.zIndex = 435;
+  function bearing() { return CAN_ROTATE && map.getBearing ? map.getBearing() || 0 : 0; }
+  // Omat tasot kääntyvät kartan mukana (rotatePane); tuuliviuhka piirretään näytön koordinaateissa.
+  function makePane(name, z, fixed) {
+    var parent = CAN_ROTATE ? map.getPane(fixed ? 'norotatePane' : 'rotatePane') : undefined;
+    map.createPane(name, parent).style.zIndex = z;
+  }
+  makePane('maskPane', 300);
+  makePane('forestPane', 350);
+  makePane('cutsPane', 400);
+  makePane('protCasingPane', 410);
+  makePane('protPane', 420);
+  makePane('boundaryPane', 430);
+  makePane('rainPane', 380);
+  makePane('windPane', 435, true);
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 
   map.on('moveend', function () {
@@ -210,6 +220,8 @@
     toggleLayer(forestLayer, settings.showForest && !!S.forest);
     toggleLayer(S.layers.protCasing, settings.showProtected);
     toggleLayer(S.layers.prot, settings.showProtected);
+    toggleLayer(S.layers.cutsCasing, settings.showCuts);
+    toggleLayer(S.layers.cuts, settings.showCuts);
     toggleLayer(S.layers.mask, settings.showMask);
     toggleLayer(S.layers.mask2, settings.showMask);
   }
@@ -237,6 +249,16 @@
   var legend = new LegendControl();
   legend.addTo(map);
 
+  // Leaflet tunnistaa kartan ohi menevät napautukset elementin vanhemmista: sisältö vaihdetaan vasta
+  // napautuksen jälkeen, ettei se päädy kartalle (ja avaa tietokorttia selitteen alta).
+  function legendButton(btn, open) {
+    L.DomEvent.on(btn, 'click', function (e) {
+      L.DomEvent.stop(e);
+      legendOpen = open;
+      setTimeout(renderLegend, 0);
+    });
+  }
+
   function renderLegend() {
     var div = legend._div;
     if (!div) return;
@@ -251,7 +273,7 @@
         '<rect x="2.5" y="9.75" width="6" height="4.5" rx="1" fill="' + MK.cssRGB(C.young) + '"/>' +
         '<rect x="2.5" y="16" width="6" height="4.5" rx="1" fill="' + MK.cssRGB(C.old) + '"/>' +
         '<path d="M11.5 5.75h10M11.5 12h10M11.5 18.25h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>';
-      div.querySelector('.legend-fab').addEventListener('click', function () { legendOpen = true; renderLegend(); });
+      legendButton(div.querySelector('.legend-fab'), true);
       return;
     }
     var html = '<div class="legend-head"><span>Selite</span><button type="button" class="legend-close" aria-label="Piilota selite" aria-expanded="true">' +
@@ -266,6 +288,8 @@
         '<li><span class="sw sw-line"></span>Lupa-alueen raja</li>' +
         (settings.showWind ? '<li><span class="sw sw-wind"></span>Tuuliviuhka (hajusi kulku)</li>' : '') +
         (settings.showRain ? '<li><span class="sw sw-rain"></span><span>Sade 0–2 h<small>heikko → kova</small></span></li>' : '') +
+        (settings.showCuts ? '<li><span class="sw sw-cut"></span><span>Uusi hakkuuaukko<small>' + ((S.index && S.index.mvmiYear) || 2023) + ' jälkeen, latvusmalli tai ilmakuva</small></span></li>' +
+          '<li><span class="sw sw-cut-dash"></span><span>Hakkuuilmoitus<small>toteutuminen ei varmaa</small></span></li>' : '') +
         '</ul>';
       if (S.stats && S.stats.total) {
         var st = S.stats, forest = st.young + st.old;
@@ -274,7 +298,7 @@
       }
     }
     div.innerHTML = html;
-    div.querySelector('.legend-close').addEventListener('click', function () { legendOpen = false; renderLegend(); });
+    legendButton(div.querySelector('.legend-close'), false);
   }
 
   // ---------------------------------------------------------------------------
@@ -340,10 +364,10 @@
   }
 
   function clearAreaLayers() {
-    ['mask', 'mask2', 'boundaryCasing', 'boundary', 'protCasing', 'prot'].forEach(function (k) {
+    ['mask', 'mask2', 'boundaryCasing', 'boundary', 'protCasing', 'prot', 'cutsCasing', 'cuts'].forEach(function (k) {
       if (S.layers[k]) { map.removeLayer(S.layers[k]); S.layers[k] = null; }
     });
-    S.forest = null; S.stats = null;
+    S.forest = null; S.stats = null; S.cutsGJ = null;
     if (map.hasLayer(forestLayer)) map.removeLayer(forestLayer);
     closeInfo();
   }
@@ -380,6 +404,18 @@
       style: { color: '#1a1a1a', weight: 5.5, opacity: 0.55, fill: false } });
     S.layers.prot = L.geoJSON(prot, { pane: 'protPane', interactive: false,
       style: { color: '#ffd400', weight: 3, opacity: 1, dashArray: '9 7', lineCap: 'butt', fillColor: '#ffd400', fillOpacity: 0.06 } });
+
+    // Uudet hakkuut: tunnistettu aukko yhtenäisellä viivalla, pelkkä ilmoitus katkoviivalla.
+    var cuts = S.cutsGJ || { type: 'FeatureCollection', features: [] };
+    var cutColor = MK.cssRGB(MK.COLORS.treeless);
+    S.layers.cutsCasing = L.geoJSON(cuts, { pane: 'cutsPane', interactive: false, style: function (f) {
+      return isDetectedCut(f.properties) ? { color: '#ffffff', weight: 5.5, opacity: 0.8, fill: false } :
+        { color: '#ffffff', weight: 4.5, opacity: 0.6, fill: false, dashArray: '8 6', lineCap: 'butt' };
+    } });
+    S.layers.cuts = L.geoJSON(cuts, { pane: 'cutsPane', interactive: false, attribution: 'Metsäkeskus', style: function (f) {
+      return isDetectedCut(f.properties) ? { color: cutColor, weight: 2.5, opacity: 1, fillColor: cutColor, fillOpacity: 0.3 } :
+        { color: cutColor, weight: 2.2, opacity: 1, dashArray: '8 6', lineCap: 'butt', fillColor: cutColor, fillOpacity: 0.06 };
+    } });
     applyLayerVisibility();
   }
 
@@ -399,10 +435,11 @@
     updateWindUi();
     refreshWind(a);
     if (!opts.keepView) fitArea(a);
-    return Promise.all([fetchJSON(a.boundary), fetchJSON(a.protected).catch(function () { return { type: 'FeatureCollection', features: [] }; })])
+    var empty = function () { return { type: 'FeatureCollection', features: [] }; };
+    return Promise.all([fetchJSON(a.boundary), fetchJSON(a.protected).catch(empty), a.cuts ? fetchJSON(a.cuts).catch(empty) : empty()])
       .then(function (res) {
         if (S.area !== a) return;
-        S.boundaryGJ = res[0]; S.protectedGJ = res[1];
+        S.boundaryGJ = res[0]; S.protectedGJ = res[1]; S.cutsGJ = res[2];
         drawAreaLayers();
         return loadForest(a).then(function (F) {
           if (S.area !== a) return;
@@ -444,20 +481,49 @@
     if (S.boundaryGJ) (S.boundaryGJ.features || []).forEach(function (f) {
       if (MK.geometryContains(f.geometry, ll.lng, ll.lat)) inside = true;
     });
-    showInfo(ll, info, prots, inside);
+    var cuts = [];
+    if (S.cutsGJ && settings.showCuts) (S.cutsGJ.features || []).forEach(function (f) {
+      if (MK.geometryContains(f.geometry, ll.lng, ll.lat)) cuts.push(f.properties || {});
+    });
+    showInfo(ll, info, prots, inside, cuts);
   });
 
-  function showInfo(ll, info, prots, inside) {
+  function isDetectedCut(p) { return !!p && p.lahde !== 'ilmoitus'; }
+  var CUT_SOURCE = { latvusmalli: 'latvusmalli', ilmakuva: 'ilmakuva' };
+  function cutSourceText(p) { return (CUT_SOURCE[p.lahde] || 'kaukokartoitus') + (p.vuosi ? ' ' + p.vuosi : ''); }
+  function fmtHa(v) { v = Number(v); return isFinite(v) && v > 0 ? (v < 10 ? v.toFixed(1).replace('.', ',') : fmtInt(v)) + ' ha' : ''; }
+  function fmtMonth(d) { var m = /^(\d{4})-(\d{2})/.exec(String(d || '')); return m ? Number(m[2]) + '/' + m[1] : ''; }
+
+  function showInfo(ll, info, prots, inside, cuts) {
     var card = $('infoCard');
     var C = MK.COLORS, color = null;
+    cuts = cuts || [];
+    var detected = cuts.filter(isDetectedCut), declared = cuts.filter(function (p) { return !isDetectedCut(p); });
     if (info) color = info.kind === 'treeless' ? C.treeless : (info.kind === 'old' ? C.old : MK.ageColor(info.age, settings.oldAge));
     var title = info ? info.title : (inside ? 'Ei metsätietoa' : 'Lupa-alueen ulkopuolella');
+    var detail = info ? info.detail : '';
+    if (detected.length && info && info.kind !== 'treeless') {
+      // Metsätieto on vanhempi kuin hakkuu: näytetään ensin uusi tilanne.
+      color = C.treeless;
+      title = 'Hakkuuaukko (' + cutSourceText(detected[0]) + ')';
+      detail = 'Metsätiedossa ' + ((S.index && S.index.mvmiYear) || '') + ': ' + info.title.toLowerCase() + ', ' + info.detail.charAt(0).toLowerCase() + info.detail.slice(1);
+    }
     var html = '<div class="info-row">' +
       (color ? '<span class="sw" style="background:' + MK.cssRGB(color) + '"></span>' : '') +
       '<div><div class="info-title">' + esc(title) + '</div>' +
-      (info ? '<div class="info-detail">' + esc(info.detail) + '</div>' : (inside ? '<div class="info-detail muted">Pelto, vesi tai muu kuin metsätalousmaa</div>' : '')) +
+      (info ? '<div class="info-detail">' + esc(detail) + '</div>' : (inside ? '<div class="info-detail muted">Pelto, vesi tai muu kuin metsätalousmaa</div>' : '')) +
       '</div><button type="button" class="info-close" aria-label="Sulje"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button></div>';
     var extra = [];
+    detected.forEach(function (p) {
+      extra.push('<div class="tag"><span class="sw sw-cut"></span><span><b>Uusi hakkuuaukko</b> <span class="muted">(' +
+        esc(cutSourceText(p)) + (fmtHa(p.ha) ? ', ' + esc(fmtHa(p.ha)) : '') + ')</span></span></div>');
+    });
+    declared.forEach(function (p) {
+      var when = fmtMonth(p.pvm);
+      var state = p.vahv ? 'näkyy latvusmallissa ' + (p.vahvVuosi || '') : 'toteutuminen ei varmaa';
+      extra.push('<div class="tag"><span class="sw sw-cut-dash"></span><span><b>Hakkuuilmoitus</b>' + (when ? ' ' + esc(when) : '') +
+        (p.tapa ? ': ' + esc(String(p.tapa).toLowerCase()) : '') + ' <span class="muted">(' + esc(state.trim()) + ')</span></span></div>');
+    });
     prots.forEach(function (p) {
       extra.push('<div class="tag"><span class="sw sw-dash"></span><span><b>Suojelualue</b>' +
         (p.nimi ? ': ' + esc(p.nimi) : '') + (p.tyyppi ? ' <span class="muted">(' + esc(p.tyyppi) + ')</span>' : '') + '</span></div>');
@@ -480,12 +546,68 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Kartan kääntäminen
+  // ---------------------------------------------------------------------------
+
+  function updateCompass() {
+    var b = bearing(), btn = $('compassBtn');
+    var off = Math.abs(((b % 360) + 540) % 360 - 180) > 0.5;
+    btn.hidden = !off;
+    btn.querySelector('svg').style.transform = 'rotate(' + Math.round(b) + 'deg)';
+  }
+  if (CAN_ROTATE) {
+    $('compassBtn').addEventListener('click', function () { map.setBearing(0); });
+    map.on('rotate', function () {
+      updateCompass();
+      updateWindUi();
+      if (S.layers.me && S.pos) S.layers.me.setIcon(meIcon(S.heading));
+    });
+    installRotateThreshold(12);
+  }
+
+  // Kahden sormen nipistys kääntäisi karttaa herkästi myös zoomatessa. Kääntö alkaa vasta,
+  // kun sormia on kierretty kynnyskulman verran, ja jatkuu siitä ilman nykäystä.
+  function installRotateThreshold(deg) {
+    var tg = map.touchGestures;
+    if (!tg || typeof tg._onTouchStart !== 'function' || typeof tg._onTouchMove !== 'function') return;
+    // Kosketuksen kuuntelija on rekisteröity jo kartan luonnissa: vaihdetaan se uuteen.
+    var wasOn = tg.enabled();
+    if (wasOn) tg.disable();
+    var start = tg._onTouchStart, move = tg._onTouchMove;
+    function angle(e) {
+      var p1 = map.mouseEventToContainerPoint(e.touches[0]), p2 = map.mouseEventToContainerPoint(e.touches[1]);
+      return { a: Math.atan2(p1.y - p2.y, p1.x - p2.x) * 180 / Math.PI, v: p1.subtract(p2) };
+    }
+    tg._onTouchStart = function (e) {
+      var r = start.apply(this, arguments);
+      if (e.touches && e.touches.length === 2) { this._mkA0 = angle(e).a; this._mkFree = false; }
+      return r;
+    };
+    tg._onTouchMove = function (e) {
+      if (this.rotate && this._rotating && !this._mkFree && e.touches && e.touches.length === 2) {
+        var g = angle(e), d = ((g.a - this._mkA0) % 360 + 540) % 360 - 180;
+        if (Math.abs(d) < deg) {
+          this._rotating = false;
+          try { return move.apply(this, arguments); } finally { this._rotating = true; }
+        }
+        // Kynnys ylitetty: aloitetaan kääntö tästä asennosta (sama laskenta kuin laajennuksessa).
+        this._mkFree = true;
+        this._startTheta = Math.atan(g.v.x / g.v.y);
+        this._startBearing = map.getBearing();
+        if (g.v.y < 0) this._startBearing += 180;
+      }
+      return move.apply(this, arguments);
+    };
+    if (wasOn) tg.enable();
+  }
+
+  // ---------------------------------------------------------------------------
   // Oma sijainti
   // ---------------------------------------------------------------------------
 
   function meIcon(heading) {
     var arrow = (heading === null || heading === undefined || isNaN(heading)) ? '' :
-      '<div class="me-arrow" style="transform:rotate(' + Math.round(heading) + 'deg)"></div>';
+      '<div class="me-arrow" style="transform:rotate(' + Math.round(heading + bearing()) + 'deg)"></div>';
     return L.divIcon({ className: 'me-marker', html: arrow + '<div class="me-dot"></div>', iconSize: [0, 0] });
   }
 
@@ -494,6 +616,7 @@
     var ll = L.latLng(p.coords.latitude, p.coords.longitude);
     var acc = p.coords.accuracy || 0;
     var heading = (p.coords.speed && p.coords.speed > 0.6) ? p.coords.heading : null;
+    S.heading = heading;
     if (!S.layers.me) {
       S.layers.meAcc = L.circle(ll, { radius: acc, color: '#ff7a1a', weight: 1.5, opacity: 0.9, fillColor: '#ff7a1a', fillOpacity: 0.12, interactive: false }).addTo(map);
       S.layers.me = L.marker(ll, { icon: meIcon(heading), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
@@ -610,11 +733,11 @@
     layers.forEach(function (l) {
       MK.listTiles(a.forest.bounds, OFFLINE_ZMIN, settings.maxZoom, TILE_PAD_DEG).forEach(function (t) { tiles.push([l, t[0], t[1], t[2]]); });
     });
-    var job = { ctrl: new AbortController(), done: 0, failed: 0, total: tiles.length + 3, authFail: 0, corsFail: 0, ok: 0, areaId: a.id, ui: ui };
+    var dataUrls = [a.forest.file, a.boundary, a.protected, a.cuts].filter(Boolean).map(absUrl);
+    var job = { ctrl: new AbortController(), done: 0, failed: 0, total: tiles.length + dataUrls.length, authFail: 0, corsFail: 0, ok: 0, areaId: a.id, ui: ui };
     S.dl = job;
     job.ui.start(job);
 
-    var dataUrls = [a.forest.file, a.boundary, a.protected].map(absUrl);
     var dataCache, tileCache;
 
     requestPersist()
@@ -796,7 +919,8 @@
     var rec = offline[a.id];
     var active = S.area && S.area.id === a.id;
     var card = h('div', { class: 'area-card' + (active ? ' active' : '') });
-    var sub = fmtInt(a.areaHa) + ' ha' + (a.protectedCount ? ' · ' + a.protectedCount + ' suojelualue' + (a.protectedCount === 1 ? '' : 'tta') : '');
+    var sub = fmtInt(a.areaHa) + ' ha' + (a.protectedCount ? ' · ' + a.protectedCount + ' suojelualue' + (a.protectedCount === 1 ? '' : 'tta') : '') +
+      (a.cutsCount ? ' · ' + a.cutsCount + ' uutta hakkuuaukkoa' : '');
     card.appendChild(h('button', { type: 'button', class: 'area-main', onclick: function () { closeSheet(); selectArea(a.id); } },
       h('div', { class: 'area-title', text: a.name }), h('div', { class: 'area-sub', text: sub })));
 
@@ -868,6 +992,9 @@
 
     body.appendChild(h('h3', { text: 'Muut tasot' }));
     body.appendChild(toggleRow('Luonnonsuojelualueet', 'Katkoviiva', settings.showProtected, function (v) { settings.showProtected = v; saveSettings(); applyLayerVisibility(); }));
+    body.appendChild(toggleRow('Uudet hakkuut', 'Metsätiedon jälkeen tehdyt aukot ja hakkuuilmoitukset', settings.showCuts, function (v) {
+      settings.showCuts = v; saveSettings(); applyLayerVisibility(); renderLegend();
+    }));
     body.appendChild(toggleRow('Himmennä lupa-alueen ulkopuoli', null, settings.showMask, function (v) { settings.showMask = v; saveSettings(); applyLayerVisibility(); }));
     body.appendChild(toggleRow('Sade-ennuste 0–2 h', 'MET Norway · haetaan sijaintisi ympäriltä vain, kun sovellus on auki', settings.showRain, function (v) {
       settings.showRain = v; saveSettings(); renderLegend();
@@ -932,6 +1059,7 @@
       '<p>' + attrib.map(esc).join('<br>') + '</p>' +
       '<p>Pohjakartta: © Maanmittauslaitos (CC BY 4.0) tai © OpenStreetMapin tekijät.</p>' +
       '<p>Metsätieto on satelliittikuviin perustuva arvio. Yksittäisen 16 m ruudun arvo voi poiketa todellisuudesta, mutta isompien kuvioiden yleiskuva on luotettavampi. ' +
+      'Sen jälkeiset hakkuut tunnistetaan Metsäkeskuksen latvusmallista ja Maanmittauslaitoksen ilmakuvista. Hakkuuilmoitus kertoo vain aikeesta: hakkuu voi olla vielä tekemättä. ' +
       'Lupa-alueen raja on käsin piirretty: virallinen raja on eräluvat.fi:n kartassa.</p>' +
       '<p>Tuuliennuste: Ilmatieteen laitos (CC BY 4.0), varalla Open-Meteo (CC BY 4.0). Sade-ennuste: MET Norway (CC BY 4.0).</p>' +
       '<p>Sijaintisi käsitellään tässä laitteessa. Tuuliennuste haetaan lupa-alueen keskipisteeseen. Kun sadetaso on päällä ja sovellus auki, ' +
@@ -1082,7 +1210,7 @@
       map.getPane('windPane').appendChild(c);
       map.on('zoomstart', this._hide, this);
       map.on('zoomend moveend resize viewreset', this._show, this);
-      map.on('move', this._draw, this);
+      map.on('move rotate', this._draw, this);
       this._loopFn = this._loop.bind(this);
       this._show();
       if (!REDUCED_MOTION) this._raf = requestAnimationFrame(this._loopFn);
@@ -1092,7 +1220,7 @@
       this._raf = 0;
       map.off('zoomstart', this._hide, this);
       map.off('zoomend moveend resize viewreset', this._show, this);
-      map.off('move', this._draw, this);
+      map.off('move rotate', this._draw, this);
       L.DomUtil.remove(this._canvas);
       this._canvas = null;
     },
@@ -1130,7 +1258,8 @@
         c.width = Math.round(size.x * dpr); c.height = Math.round(size.y * dpr);
         c.style.width = size.x + 'px'; c.style.height = size.y + 'px';
       }
-      L.DomUtil.setPosition(c, map.containerPointToLayerPoint([0, 0]));
+      // Kangas peittää näkymän: sijoitetaan kääntymättömään tasoon näytön vasempaan yläkulmaan.
+      L.DomUtil.setPosition(c, CAN_ROTATE ? L.point(0, 0).subtract(map._getMapPanePos()) : map.containerPointToLayerPoint([0, 0]));
       var ctx = c.getContext('2d');
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, size.x, size.y);
@@ -1241,7 +1370,7 @@
     var w = currentWind();
     btn.hidden = !S.area && !windManual;
     if (w) {
-      arrow.style.transform = 'rotate(' + Math.round(MK.norm360(w.dir + 180)) + 'deg)';
+      arrow.style.transform = 'rotate(' + Math.round(MK.norm360(w.dir + 180 + bearing())) + 'deg)';
       arrow.style.opacity = '1';
       spd.textContent = w.manual ? 'oma' : (w.spd !== null ? Math.round(w.spd) + ' m/s' : '');
       btn.setAttribute('aria-label', 'Tuuli ' + MK.windFromName(w.dir) + (w.spd !== null ? ' ' + fmt1(w.spd) + ' m/s' : '') + '. Avaa tuulitiedot.');

@@ -96,7 +96,21 @@ def main(dest: Path):
                  "geometry": {"type": "Polygon", "coordinates": [prot]}}]}
     (out / "boundary.geojson").write_text(json.dumps(boundary))
     (out / "protected.geojson").write_text(json.dumps(protected))
-    files = [(out / f).read_bytes() for f in ("forest.png", "boundary.geojson", "protected.geojson")]
+
+    def box(lo0, la0, lo1, la1):
+        return [[[lo0, la0], [lo1, la0], [lo1, la1], [lo0, la1], [lo0, la0]]]
+    cuts = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"lahde": "latvusmalli", "vuosi": 2025, "ha": 6.3},
+         "geometry": {"type": "Polygon", "coordinates": box(25.066, 61.2215, 25.078, 61.2265)}},
+        {"type": "Feature", "properties": {"lahde": "ilmoitus", "pvm": "2024-06-18", "tapa": "Avohakkuu", "ha": 4.1,
+                                           "vahv": True, "vahvVuosi": 2025},
+         "geometry": {"type": "Polygon", "coordinates": box(25.067, 61.222, 25.077, 61.226)}},
+        {"type": "Feature", "properties": {"lahde": "ilmoitus", "pvm": "2026-05-04", "tapa": "Siemenpuuhakkuu <b>x</b>",
+                                           "ha": 2.2, "vahv": False},
+         "geometry": {"type": "Polygon", "coordinates": box(25.128, 61.2225, 25.140, 61.2265)}},
+    ]}
+    (out / "cuts.geojson").write_text(json.dumps(cuts, ensure_ascii=False))
+    files = [(out / f).read_bytes() for f in ("forest.png", "boundary.geojson", "protected.geojson", "cuts.geojson")]
     ver = build.sha1_bytes(*files)[:12]
     entry = {
         "id": aid, "name": "9999 Testialue<script>alert(2)</script>", "areaHa": 1450, "center": [61.238, 25.1], "version": ver,
@@ -104,10 +118,11 @@ def main(dest: Path):
         "forest": dict(meta, file=f"data/{aid}/forest.png?v={ver}"),
         "boundary": f"data/{aid}/boundary.geojson?v={ver}",
         "protected": f"data/{aid}/protected.geojson?v={ver}",
+        "cuts": f"data/{aid}/cuts.geojson?v={ver}", "cutsCount": 1, "declCount": 2, "chmYears": [2025],
         "protectedCount": 1, "built": "2026-10-15T07:00:00Z",
     }
     index = {"generated": "2026-10-15T07:00:00Z", "encoding": 1, "mvmiYear": 2023,
-             "attribution": [build.FOREST_ATTRIBUTION.format(year=2023), build.PROTECTED_ATTRIBUTION], "areas": [entry]}
+             "attribution": [build.FOREST_ATTRIBUTION.format(year=2023), build.PROTECTED_ATTRIBUTION, build.CUTS_ATTRIBUTION], "areas": [entry]}
     (data / "areas.json").write_text(json.dumps(index, ensure_ascii=False, indent=1))
     print(f"fixture: {w}x{h} -> {meta['width']}x{meta['height']}, versio {ver}")
 

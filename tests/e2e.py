@@ -195,6 +195,46 @@ def main():
         page.screenshot(path=str(SHOTS / "03-suojelualue.png"))
         page.click(".info-close")
 
+        # Uudet hakkuut: latvusmallin aukko, vahvistettu ilmoitus ja pelkkä ilmoitus
+        page.wait_for_function("() => window.__mk.S.cutsGJ && window.__mk.S.layers.cuts && window.__mk.map.hasLayer(window.__mk.S.layers.cuts)")
+        assert page.evaluate("window.__mk.S.cutsGJ.features.length") == 3
+        page.evaluate("window.__mk.map.setView([61.224, 25.072], 15, {animate: false})")
+        page.wait_for_timeout(500)
+        cp = page.evaluate("() => { const p = window.__mk.map.latLngToContainerPoint([61.224, 25.072]); return {x:p.x, y:p.y}; }")
+        page.mouse.click(cp["x"], cp["y"])
+        page.wait_for_selector("#infoCard:not([hidden])")
+        cinfo = page.inner_text("#infoCard")
+        print("HAKKUU:", cinfo.replace("\n", " | "))
+        assert "Hakkuuaukko (latvusmalli 2025)" in cinfo and "Uusi hakkuuaukko" in cinfo, cinfo
+        assert "Hakkuuilmoitus 6/2024: avohakkuu" in cinfo and "näkyy latvusmallissa 2025" in cinfo, cinfo
+        assert "Metsätiedossa 2023" in cinfo, cinfo
+        page.screenshot(path=str(SHOTS / "17-hakkuu.png"))
+        page.click(".info-close")
+        page.evaluate("window.__mk.map.setView([61.2245, 25.134], 15, {animate: false})")
+        page.wait_for_timeout(400)
+        dp = page.evaluate("() => { const p = window.__mk.map.latLngToContainerPoint([61.2245, 25.134]); return {x:p.x, y:p.y}; }")
+        page.mouse.click(dp["x"], dp["y"])
+        page.wait_for_selector("#infoCard:not([hidden])")
+        dinfo = page.inner_text("#infoCard")
+        print("ILMOITUS:", dinfo.replace("\n", " | "))
+        assert "Hakkuuilmoitus 5/2026: siemenpuuhakkuu <b>x</b>" in dinfo and "toteutuminen ei varmaa" in dinfo, dinfo
+        assert "Hakkuuaukko" not in dinfo.split("\n")[0], dinfo
+        assert page.evaluate("document.querySelectorAll('#infoCard b').length") == 1   # vain oma otsikko, ei syötteen <b>
+        page.screenshot(path=str(SHOTS / "18-ilmoitus.png"))
+        page.click(".info-close")
+        page.click(".legend-fab")
+        page.wait_for_selector(".legend-close")
+        assert "Uusi hakkuuaukko" in page.inner_text(".legend") and "Hakkuuilmoitus" in page.inner_text(".legend")
+        page.click(".legend-close")
+        page.wait_for_selector(".legend-fab")
+        page.click("#layersBtn")
+        page.click("text=Uudet hakkuut")
+        assert not page.evaluate("window.__mk.map.hasLayer(window.__mk.S.layers.cuts)")
+        page.click("text=Uudet hakkuut")
+        assert page.evaluate("window.__mk.map.hasLayer(window.__mk.S.layers.cuts)")
+        page.click("#sheetClose")
+        page.evaluate("window.__mk.map.setView([61.2395, 25.072], 14, {animate: false})")
+
         # GPS
         page.click("#locateBtn")
         page.wait_for_selector(".me-dot")
@@ -222,6 +262,53 @@ def main():
         # lounaistuuli (225-227) -> haju koilliseen; liukuväri: lähellä vahvempi kuin kauempana; vastatuuleen ei mitään
         assert 40 <= fan["bearing"] <= 50 and fan["down25"] > fan["down60"] > 0 and fan["up"] == 0 and fan["side"] == 0, fan
         page.screenshot(path=str(SHOTS / "12-tuuliviuhka.png"))
+
+        # Kartan kääntö kahdella sormella (CDP-kosketustapahtumat)
+        cdp = ctx.new_cdp_session(page)
+
+        def twist(total_deg, steps=12, r=90):
+            import math as _m
+            cx, cy = 195, 420
+            def pts(a):
+                rad = _m.radians(a)
+                return [{"x": cx + r * _m.cos(rad), "y": cy + r * _m.sin(rad), "id": 1},
+                        {"x": cx - r * _m.cos(rad), "y": cy - r * _m.sin(rad), "id": 2}]
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": pts(0)})
+            for i in range(1, steps + 1):
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": pts(total_deg * i / steps)})
+                page.wait_for_timeout(16)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            page.wait_for_timeout(400)
+            return page.evaluate("window.__mk.map.getBearing()")
+
+        b_small = twist(8)
+        print("KÄÄNTÖ 8°:", round(b_small, 1))
+        assert abs(b_small) < 0.5 and page.is_hidden("#compassBtn"), b_small          # kynnys estää vahingossa kääntymisen
+        b_big = twist(50)
+        print("KÄÄNTÖ 50°:", round(b_big, 1))
+        assert 25 <= abs(b_big) <= 45, b_big
+        assert page.is_visible("#compassBtn")
+        fan2 = page.evaluate("""() => {
+          const lay = window.__mk.S.layers.wind, f = lay._fan, map = window.__mk.map, c = lay._canvas;
+          const dpr = c.width / map.getSize().x, ctx = c.getContext('2d');
+          const alphaAt = (b, d) => { const ll = MK.destPoint(f.lat, f.lon, b, d); const p = map.latLngToContainerPoint(ll);
+            return ctx.getImageData(Math.round(p.x*dpr), Math.round(p.y*dpr), 1, 1).data[3]; };
+          return { down25: alphaAt(f.bearing, f.len*0.25), up: alphaAt(f.bearing + 180, f.len*0.3) };
+        }""")
+        print("VIUHKA KÄÄNNETYSSÄ:", fan2)
+        assert fan2["down25"] > 0 and fan2["up"] == 0, fan2
+        # Napautus osuu oikeaan paikkaan käännetyllä kartalla
+        tgt = page.evaluate("() => { const ll = window.__mk.map.containerPointToLatLng([150, 300]); return [ll.lat, ll.lng]; }")
+        page.mouse.click(150, 300)
+        page.wait_for_selector("#infoCard:not([hidden])")
+        coord = page.inner_text("#infoCard .info-meta")
+        print("NAPAUTUS KÄÄNNETYSSÄ:", coord.split("\n")[0], "odotettu", round(tgt[0], 5), round(tgt[1], 5))
+        assert f"{tgt[0]:.5f}".replace(".", ",") in coord, (coord, tgt)
+        page.screenshot(path=str(SHOTS / "19-kaannetty.png"))
+        page.click(".info-close")
+        page.click("#compassBtn")
+        page.wait_for_timeout(300)
+        assert abs(page.evaluate("window.__mk.map.getBearing()")) < 0.5 and page.is_hidden("#compassBtn")
         page.click("#windBtn")
         page.wait_for_selector(".wind-now")
         wtxt = page.inner_text("#sheetBody")
@@ -304,6 +391,8 @@ def main():
         rec = page.evaluate("window.__mk.offline()['9999-testialue']")
         print("TALLENNETTU:", json.dumps(rec), "tiilipyyntöjä", len(TILE_REQUESTS) - n_before)
         assert rec["failed"] == 0 and rec["tiles"] > 50, rec
+        cached = page.evaluate("caches.open('mk-data-v1').then(c => c.keys()).then(ks => ks.map(k => k.url))")
+        assert any("cuts.geojson" in u for u in cached), cached
         page.screenshot(path=str(SHOTS / "06-tallennettu.png"))
         page.click("#sheetClose")
 
@@ -340,11 +429,12 @@ def main():
         page.wait_for_timeout(800)
         assert page.query_selector(".legend-fab") is not None    # selite piilossa oletuksena
         page.click(".legend-fab")
+        page.wait_for_selector(".legend-close")
         legend = page.inner_text(".legend")
         assert "≥ 60 v" in legend, legend
         page.screenshot(path=str(SHOTS / "10-raja60.png"))
         page.click(".legend-close")
-        assert page.query_selector(".legend-fab") is not None
+        page.wait_for_selector(".legend-fab")
         # Taimikon vinoviivoitus lähikuvassa
         tp = page.evaluate("""() => {
           const F = window.__mk.S.forest; let best = null;

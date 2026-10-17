@@ -1,7 +1,7 @@
 /* Metsäkartan service worker: pitää sovelluksen ja tallennetut kartat käytettävissä ilman verkkoa. */
 'use strict';
 
-var SHELL_CACHE = 'mk-shell-2026-10-17a';
+var SHELL_CACHE = 'mk-shell-2026-10-17b';
 var TILE_CACHE = 'mk-tiles-v1';
 var DATA_CACHE = 'mk-data-v1';
 var SHELL = [
@@ -13,6 +13,7 @@ var SHELL = [
   'manifest.webmanifest',
   'vendor/leaflet/leaflet.js',
   'vendor/leaflet/leaflet.css',
+  'vendor/leaflet-rotate/leaflet-rotate.js',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/apple-touch-icon.png'

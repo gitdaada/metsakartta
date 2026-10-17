@@ -37,6 +37,9 @@
   </header>
 
   <nav class="fabs" aria-label="Karttatyökalut">
+    <button id="compassBtn" class="fab fab-compass" type="button" aria-label="Käännä pohjoinen ylös" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l4 9.5h-8z" fill="#ef4444"/><path d="M12 21.5l-4-9.5h8z" fill="currentColor" opacity="0.85"/></svg>
+    </button>
     <button id="windBtn" class="fab fab-wind" type="button" aria-label="Tuuli" aria-haspopup="dialog" hidden>
       <svg class="wind-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l6 8h-4v12h-4V10H6z" fill="currentColor"/></svg>
       <span id="windSpd" class="wind-spd"></span>
@@ -81,6 +84,7 @@
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/leaflet-rotate/leaflet-rotate.js"></script>
   <script src="core.js"></script>
   <script src="app.js"></script>
 </body>
