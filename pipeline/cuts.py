@@ -285,6 +285,7 @@ def compute_cuts(poly, hgt_dm: np.ndarray, valid: np.ndarray, transform, cfg: di
         low = new_cut_mask(hgt_m, valid, p90, cfg["chm"])
         info["chmYears"] = sorted({int(y) for y in np.unique(years[valid]) if y > 0})
         clean = sieve(low.astype(np.uint8), size=min_cells, connectivity=8).astype(bool) & valid
+        info["_low"] = clean
         polys = [shape(g) for g, v in shapes(clean.astype(np.uint8), mask=clean, transform=transform, connectivity=8) if v == 1]
         smooth = float(cfg["chm"].get("smoothM", 6))
         for g in polys:

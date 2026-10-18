@@ -71,5 +71,66 @@
       "confirmFrac": 0.4,
       "pageSize": 5000
     }
+  },
+  "habitat": {
+    "enabled": true,
+    "files": {
+      "pine": "manty_vmi1x_1923.tif",
+      "spruce": "kuusi_vmi1x_1923.tif",
+      "birch": "koivu_vmi1x_1923.tif",
+      "otherbl": "muulp_vmi1x_1923.tif",
+      "volume": "tilavuus_vmi1x_1923.tif",
+      "canopy": "latvuspeitto_vmi1x_1923.tif",
+      "canopyBl": "lehtip_latvuspeitto_vmi1x_1923.tif",
+      "site": "kasvupaikka_vmi1x_1923.tif",
+      "soil": "paatyyppi_vmi1x_1923.tif"
+    },
+    "metsoSite": {
+      "1": 0.4,
+      "2": 0.6,
+      "3": 0.9,
+      "4": 1.0,
+      "5": 0.9,
+      "6": 0.6
+    },
+    "metsoSoil": {
+      "1": 1.0,
+      "2": 0.6,
+      "3": 1.0,
+      "4": 0.0
+    },
+    "pyySite": {
+      "1": 1.0,
+      "2": 1.0,
+      "3": 0.9,
+      "4": 0.55,
+      "5": 0.3
+    },
+    "pyySoil": {
+      "1": 1.0,
+      "2": 1.0,
+      "3": 0.4,
+      "4": 0.0
+    },
+    "openBogCode": 4,
+    "edgeCells": 4,
+    "metsoHeight": [
+      12,
+      18
+    ],
+    "metsoAge": [
+      45,
+      85
+    ],
+    "metsoMinHeight": 10,
+    "metsoConifer": [
+      0.6,
+      0.85
+    ],
+    "metsoPine": [
+      0.3,
+      0.7
+    ],
+    "metsoPineWeight": 0.55
   }
 }

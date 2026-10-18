@@ -13,6 +13,8 @@ docs/data/<alue>/ -kansioon:
                      Sininen kanava (B):   ei käytössä (0)
   boundary.geojson   Lupa-alueen raja (WGS84)
   protected.geojson  Luonnonsuojelualueet alueella ja sen reunalla (WGS84)
+  habitat.png        Metson (R), teeren (G) ja pyyn (B) elinympäristöpisteet 0-255 samassa ruudukossa
+                     kuin forest.png, ks. pipeline/habitat.py.
   cuts.geojson       MVMI:n jälkeen tehdyt hakkuut: latvusmallin aukot ja hakkuuilmoitukset (WGS84),
                      ks. pipeline/cuts.py. Päivitetään jokaisella ajolla (viikoittain).
 
@@ -44,6 +46,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cuts as cutsmod  # noqa: E402
+import habitat as habmod  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 AREAS_DIR = ROOT / "areas"
@@ -59,7 +62,7 @@ FOREST_ATTRIBUTION = "Metsätieto: Luonnonvarakeskus, MVMI {year} (CC BY 4.0)"
 PROTECTED_ATTRIBUTION = "Suojelualueet: Syke / Metsähallitus (CC BY 4.0)"
 CUTS_ATTRIBUTION = "Uudet hakkuut: Suomen metsäkeskus, latvusmalli ja metsänkäyttöilmoitukset (CC BY 4.0)"
 DATA_FILES = (("forest", "forest.png"), ("boundary", "boundary.geojson"), ("protected", "protected.geojson"),
-              ("cuts", "cuts.geojson"))
+              ("cuts", "cuts.geojson"), ("habitat", "habitat.png"))
 
 
 # ---------------------------------------------------------------------------
@@ -132,11 +135,20 @@ def crop_to_content(r: np.ndarray, g: np.ndarray, x0: float, y1: float, res: flo
     return r, g, nx0, ny1
 
 
-def write_forest_png(path: Path, r: np.ndarray, g: np.ndarray) -> None:
+def write_forest_png(path: Path, r: np.ndarray, g: np.ndarray, b: np.ndarray | None = None) -> None:
     """Kirjoittaa RGB-PNG:n ilman väriprofiileja (selain lukee arvot sellaisenaan)."""
     from PIL import Image
-    rgb = np.dstack([r, g, np.zeros_like(r)])
+    rgb = np.dstack([r, g, np.zeros_like(r) if b is None else b])
     Image.fromarray(rgb, mode="RGB").save(path, format="PNG", optimize=True)
+
+
+def content_window(r: np.ndarray):
+    """Rivien ja sarakkeiden rajat (r0, r1, c0, c1), joilla on sisältöä; None jos tyhjä."""
+    rows = np.where(r.any(axis=1))[0]
+    cols = np.where(r.any(axis=0))[0]
+    if rows.size == 0:
+        return None
+    return int(rows[0]), int(rows[-1]) + 1, int(cols[0]), int(cols[-1]) + 1
 
 
 def forest_meta(r: np.ndarray, g: np.ndarray, x0: float, y1: float, res: float) -> dict:
@@ -477,6 +489,8 @@ def build_cuts(A: dict, cfg: dict, out: Path, old_bytes: bytes | None) -> dict:
         return {"latvusmalli": 0, "ilmoitus": 0}
     fc, info = cutsmod.compute_cuts(A["poly"], A["height"], A["valid"], A["transform"], cfg["cuts"], cfg["mvmi"]["year"], log)
     failed = "chmError" in info or "declError" in info
+    if failed:
+        info.pop("_low", None)
     if failed and old_bytes:
         log("  Käytetään edellisiä hakkuutietoja (lähde ei vastannut).")
         path.write_bytes(old_bytes)
@@ -488,6 +502,85 @@ def build_cuts(A: dict, cfg: dict, out: Path, old_bytes: bytes | None) -> dict:
     return info
 
 
+class HabitatSources:
+    """MVMI:n lisätasot elinympäristömallia varten (puulajit, latvuspeitto, kasvupaikka, päätyyppi)."""
+
+    def __init__(self, cfg: dict):
+        self.cfg = cfg
+        self.src = {k: RasterSource(cfg["mvmi"], f) for k, f in cfg.get("habitat", {}).get("files", {}).items()}
+
+    def read(self, A: dict) -> dict | None:
+        if not self.src:
+            return None
+        nod = self.cfg["mvmi"]["noDataCodes"]
+        out = {}
+        for k, rs in self.src.items():
+            arr, t = read_window(rs.open(), A["bounds"], fill=nod[-1])
+            if t != A["transform"] or arr.shape != A["age"].shape:
+                raise RuntimeError(f"{k}: eri ruudukko kuin iällä")
+            a = arr.astype(np.float32)
+            a[np.isin(arr, nod) | (arr < 0)] = np.nan
+            out[k] = a
+        out["height"] = A["height"].astype(np.float32) / 10.0
+        out["age"] = A["age"].astype(np.float32)
+        out["site"] = np.nan_to_num(out["site"], nan=0).astype(np.int32)
+        out["soil"] = np.nan_to_num(out["soil"], nan=0).astype(np.int32)
+        return out
+
+
+def products(A: dict, cfg: dict, low: np.ndarray | None, hab_layers: dict | None) -> dict:
+    """Metsä- ja elinympäristörasterit Web Mercatoriin (sama ruudukko ja rajaus)."""
+    from rasterio.transform import from_origin
+    from rasterio.warp import reproject, Resampling
+    from pyproj import Transformer
+
+    mv = cfg["mvmi"]
+    nod = mv["noDataCodes"]
+    age, height, t_a, inside, bounds = A["age"], A["height"], A["transform"], A["inside"], A["bounds"]
+    r, g = classify(age, height, nod)
+    r[~inside] = 0
+    g[~inside] = 0
+    bands = [r, g]
+    hab = None
+    if hab_layers is not None:
+        hab = habmod.habitat_scores(hab_layers, A["valid"], low, cfg["habitat"])
+        for k in ("metso", "teeri", "pyy"):
+            hab[k][~inside] = 0
+            bands.append(hab[k])
+    to3857 = Transformer.from_crs("EPSG:3067", "EPSG:3857", always_xy=True)
+    sx0, sy0, sx1, sy1 = to3857.transform_bounds(*bounds, densify_pts=21)
+    lat_c = merc_to_lonlat(0, (sy0 + sy1) / 2)[1]
+    res = round(mv["pixelSizeM"] / math.cos(math.radians(lat_c)), 3)
+    x0 = math.floor(sx0 / res) * res
+    y1 = math.ceil(sy1 / res) * res
+    w = int(math.ceil((sx1 - x0) / res))
+    h = int(math.ceil((y1 - sy0) / res))
+    dst = np.zeros((len(bands), h, w), dtype=np.uint8)
+    reproject(source=np.stack(bands), destination=dst, src_transform=t_a, src_crs="EPSG:3067",
+              dst_transform=from_origin(x0, y1, res, res), dst_crs="EPSG:3857",
+              resampling=Resampling.nearest, src_nodata=0, dst_nodata=0)
+    win = content_window(dst[0])
+    if win is None:
+        raise RuntimeError("Alueelle ei löytynyt metsätietoa. Onko rajaus Suomen alueella?")
+    r0, r1, c0, c1 = win
+    dst = dst[:, r0:r1, c0:c1]
+    rr, gg = dst[0], dst[1]
+    meta = forest_meta(rr, gg, x0 + c0 * res, y1 - r0 * res, res)
+    out = {"rr": rr, "gg": gg, "meta": meta, "valid": int((r > 0).sum())}
+    if hab is not None:
+        out["hab"] = dst[2:5]
+        out["habStats"] = habmod.area_stats(hab, A["valid"], t_a.a)
+    return out
+
+
+def write_products(P: dict, out: Path) -> None:
+    write_forest_png(out / "forest.png", P["rr"], P["gg"])
+    if "hab" in P:
+        write_forest_png(out / "habitat.png", P["hab"][0], P["hab"][1], P["hab"][2])
+    elif (out / "habitat.png").exists():
+        (out / "habitat.png").unlink()
+
+
 def finish_entry(entry: dict, area_id: str, out: Path, info: dict) -> dict:
     """Päivittää version, koon ja tiedostolinkit levyllä olevien tiedostojen mukaan."""
     files = {k: (out / f).read_bytes() for k, f in DATA_FILES if (out / f).exists()}
@@ -497,6 +590,12 @@ def finish_entry(entry: dict, area_id: str, out: Path, info: dict) -> dict:
     entry["forest"] = dict(entry["forest"], file=f"data/{area_id}/forest.png?v={version}")
     entry["boundary"] = f"data/{area_id}/boundary.geojson?v={version}"
     entry["protected"] = f"data/{area_id}/protected.geojson?v={version}"
+    if "habitat" in files:
+        entry["habitat"] = f"data/{area_id}/habitat.png?v={version}"
+        if info.get("habStats"):
+            entry["habitatHa"] = info["habStats"]
+    else:
+        entry.pop("habitat", None)
     if "cuts" in files:
         entry["cuts"] = f"data/{area_id}/cuts.geojson?v={version}"
         entry["cutsCount"] = int(info.get("latvusmalli", 0))
@@ -506,8 +605,9 @@ def finish_entry(entry: dict, area_id: str, out: Path, info: dict) -> dict:
     return entry
 
 
-def refresh_cuts(prev: dict, path: Path, area_id: str, cfg: dict, age_src: RasterSource, height_src: RasterSource) -> dict:
-    """Päivittää ajan tasalla olevan alueen hakkuutiedot. Palauttaa uuden tai saman merkinnän."""
+def refresh_cuts(prev: dict, path: Path, area_id: str, cfg: dict, age_src: RasterSource, height_src: RasterSource,
+                 habsrc: "HabitatSources") -> dict:
+    """Päivittää ajan tasalla olevan alueen hakkuutiedot (ja niistä riippuvan elinympäristön)."""
     out = OUT_DIR / area_id
     old_path = out / "cuts.geojson"
     old_bytes = old_path.read_bytes() if old_path.exists() else None
@@ -516,65 +616,53 @@ def refresh_cuts(prev: dict, path: Path, area_id: str, cfg: dict, age_src: Raste
     if old_bytes is not None and old_path.read_bytes() == old_bytes and prev.get("cuts"):
         log("  Hakkuutiedot ennallaan.")
         return prev
+    hl = read_habitat_safe(habsrc, A, path.name)
+    P = products(A, cfg, info.pop("_low", None), hl)
+    write_products(P, out)
+    if "habStats" in P:
+        info["habStats"] = P["habStats"]
     entry = finish_entry(dict(prev), area_id, out, info)
     entry["cutsUpdated"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     log(f"  Hakkuutiedot päivitetty, uusi versio {entry['version']}")
     return entry
 
 
+def read_habitat_safe(habsrc: "HabitatSources", A: dict, label: str):
+    if not cfg_enabled(habsrc.cfg, "habitat"):
+        return None
+    try:
+        return habsrc.read(A)
+    except Exception as exc:  # noqa: BLE001
+        traceback.print_exc()
+        log(f"::warning::Elinympäristön lähtötietoja ei saatu alueelle {label}: {exc}")
+        return None
+
+
+def cfg_enabled(cfg: dict, key: str) -> bool:
+    return bool(cfg.get(key, {}).get("enabled", False))
+
+
 def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, height_src: RasterSource,
-               protected: ProtectedAreas) -> dict:
-    from rasterio.transform import from_origin
-    from rasterio.warp import reproject, Resampling
-    from pyproj import Transformer
+               protected: ProtectedAreas, habsrc: "HabitatSources") -> dict:
     from shapely.geometry import mapping
 
     A = read_area(path, cfg, age_src, height_src)
     poly_wgs, poly, name, area_ha = A["poly_wgs"], A["poly"], A["name"], A["area_ha"]
     age, height, t_a, inside, bounds = A["age"], A["height"], A["transform"], A["inside"], A["bounds"]
-    mv = cfg["mvmi"]
-    nod = mv["noDataCodes"]
-    r, g = classify(age, height, nod)
-    r[~inside] = 0
-    g[~inside] = 0
-    valid = r > 0
-    log(f"  Ruutuja alueella {int(inside.sum())}, joista metsätalousmaata {int(valid.sum())}")
-
-    # Web Mercator -ruudukko, jonka ruutukoko vastaa maastossa ~16 m
-    to3857 = Transformer.from_crs("EPSG:3067", "EPSG:3857", always_xy=True)
-    sx0, sy0, sx1, sy1 = to3857.transform_bounds(*bounds, densify_pts=21)
-    lat_c = merc_to_lonlat(0, (sy0 + sy1) / 2)[1]
-    res = mv["pixelSizeM"] / math.cos(math.radians(lat_c))
-    res = round(res, 3)
-    x0 = math.floor(sx0 / res) * res
-    y1 = math.ceil(sy1 / res) * res
-    w = int(math.ceil((sx1 - x0) / res))
-    h = int(math.ceil((y1 - sy0) / res))
-    dst_t = from_origin(x0, y1, res, res)
-    dst = np.zeros((2, h, w), dtype=np.uint8)
-    reproject(
-        source=np.stack([r, g]),
-        destination=dst,
-        src_transform=t_a,
-        src_crs="EPSG:3067",
-        dst_transform=dst_t,
-        dst_crs="EPSG:3857",
-        resampling=Resampling.nearest,
-        src_nodata=0,
-        dst_nodata=0,
-    )
-    cropped = crop_to_content(dst[0], dst[1], x0, y1, res)
-    if cropped is None:
-        raise RuntimeError("Alueelle ei löytynyt metsätietoa. Onko rajaus Suomen alueella?")
-    rr, gg, cx0, cy1 = cropped
-
     out = OUT_DIR / area_id
     old_cuts = (out / "cuts.geojson").read_bytes() if (out / "cuts.geojson").exists() else None
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    write_forest_png(out / "forest.png", rr, gg)
-    meta = forest_meta(rr, gg, cx0, cy1, res)
+    info = build_cuts(A, cfg, out, old_cuts)
+    hl = read_habitat_safe(habsrc, A, path.name)
+    P = products(A, cfg, info.pop("_low", None), hl)
+    log(f"  Ruutuja alueella {int(inside.sum())}, joista metsätalousmaata {P['valid']}")
+    if "habStats" in P:
+        info["habStats"] = P["habStats"]
+        log(f"  Elinympäristö (ha sopiva/hyvä): {P['habStats']}")
+    write_products(P, out)
+    meta = P["meta"]
 
     boundary = {"type": "FeatureCollection", "features": [
         {"type": "Feature", "properties": {"nimi": name}, "geometry": round_coords(mapping(poly_wgs))}]}
@@ -590,7 +678,6 @@ def build_area(path: Path, area_id: str, cfg: dict, age_src: RasterSource, heigh
     (out / "protected.geojson").write_text(json.dumps(prot, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     log(f"  Suojelualueita: {len(prot['features'])}")
 
-    info = build_cuts(A, cfg, out, old_cuts)
     lon_c, lat_c2 = poly_wgs.centroid.x, poly_wgs.centroid.y
     entry = {
         "id": area_id,
@@ -634,6 +721,7 @@ def main() -> int:
     age_src = RasterSource(cfg["mvmi"], cfg["mvmi"]["ageFile"])
     height_src = RasterSource(cfg["mvmi"], cfg["mvmi"]["heightFile"])
     protected = ProtectedAreas(cfg["protected"])
+    habsrc = HabitatSources(cfg)
 
     result, failed, seen = [], [], set()
     for path in sources:
@@ -655,7 +743,7 @@ def main() -> int:
                 result.append(prev)
                 continue
             try:
-                result.append(refresh_cuts(prev, path, area_id, cfg, age_src, height_src))
+                result.append(refresh_cuts(prev, path, area_id, cfg, age_src, height_src, habsrc))
             except Exception as exc:  # noqa: BLE001
                 traceback.print_exc()
                 log(f"::warning::Hakkuutietojen päivitys epäonnistui alueelle {path.name}: {exc}")
@@ -663,7 +751,7 @@ def main() -> int:
             continue
         log(f"> {path.name}")
         try:
-            entry = build_area(path, area_id, cfg, age_src, height_src, protected)
+            entry = build_area(path, area_id, cfg, age_src, height_src, protected, habsrc)
             entry["srcHash"] = src_hash
             entry["source"] = f"areas/{path.name}"
             result.append(entry)
