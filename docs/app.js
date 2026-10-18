@@ -311,6 +311,7 @@
   // ---------------------------------------------------------------------------
 
   function loadIndex() {
+    if (!S.prevIndexIds) S.prevIndexIds = ((store.get('index', null) || {}).areas || []).map(function (a) { return a.id; });
     return fetch('data/areas.json', { cache: 'no-cache' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (j) { store.set('index', j); return j; })
@@ -319,6 +320,34 @@
   }
 
   function findArea(id) { for (var i = 0; i < S.areas.length; i++) if (S.areas[i].id === id) return S.areas[i]; return null; }
+
+  // Uudet alueet edellisen avauksen jälkeen: näytetään ilmoitus ja "Uusi"-merkki aluelistassa,
+  // kunnes aluelista on avattu. Ensimmäisellä käyttökerralla kaikki alueet ovat tuttuja.
+  S.newAreas = {};
+  function checkNewAreas() {
+    var known = store.get('knownAreas', null);
+    if (!Array.isArray(known)) {
+      // Ensimmäinen kerta tällä versiolla: tuttuja ovat edellisellä avauksella ladatut alueet.
+      known = S.prevIndexIds && S.prevIndexIds.length ? S.prevIndexIds.slice() : S.areas.map(function (a) { return a.id; });
+      store.set('knownAreas', known);
+    }
+    var fresh = S.areas.filter(function (a) { return known.indexOf(a.id) < 0; });
+    fresh.forEach(function (a) { S.newAreas[a.id] = true; });
+    return fresh;
+  }
+  function markAreasSeen() {
+    var known = store.get('knownAreas', []) || [];
+    S.areas.forEach(function (a) { if (known.indexOf(a.id) < 0) known.push(a.id); });
+    store.set('knownAreas', known.slice(-500));
+  }
+  function announceNewAreas(fresh) {
+    if (!fresh.length) return false;
+    var names = fresh.map(function (a) { return a.name; });
+    toast((fresh.length === 1 ? 'Uusi alue tarjolla: ' : 'Uusia alueita tarjolla: ') +
+      (names.length > 3 ? names.slice(0, 3).join(', ') + ' ja ' + (names.length - 3) + ' muuta' : names.join(', ')),
+      { label: 'Näytä', fn: function () { openSheet('areas', 'Lupa-alueet', renderAreasSheet); } }, 10000);
+    return true;
+  }
 
   function fetchJSON(url) {
     return fetch(url).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
@@ -972,6 +1001,7 @@
 
   // --- Alueet ---
   function renderAreasSheet(body) {
+    markAreasSeen();
     if (!isStandalone()) {
       body.appendChild(h('div', { class: 'notice', html: isIOS()
         ? '<b>Lisää sovellus kotinäytölle</b>, jotta tallennetut kartat säilyvät: Safari → Jaa → <i>Lisää Koti-valikkoon</i>.'
@@ -997,7 +1027,8 @@
     var sub = fmtInt(a.areaHa) + ' ha' + (a.protectedCount ? ' · ' + a.protectedCount + ' suojelualue' + (a.protectedCount === 1 ? '' : 'tta') : '') +
       (a.cutsCount ? ' · ' + a.cutsCount + ' uutta hakkuuaukkoa' : '');
     card.appendChild(h('button', { type: 'button', class: 'area-main', onclick: function () { closeSheet(); selectArea(a.id); } },
-      h('div', { class: 'area-title', text: a.name }), h('div', { class: 'area-sub', text: sub })));
+      h('div', { class: 'area-title' }, a.name, S.newAreas[a.id] ? h('span', { class: 'badge-new', text: 'Uusi' }) : null),
+      h('div', { class: 'area-sub', text: sub })));
 
     var foot = h('div', { class: 'area-offline' });
     var est = estimate(a);
@@ -1824,12 +1855,15 @@
     if (S.index && S.index.attribution) {
       forestLayer.options.attribution = 'Luke, Syke, Ilmatieteen laitos (CC BY 4.0)';
     }
+    var fresh = checkNewAreas();
     if (last && findArea(last)) selectArea(last, { keepView: true });
     else if (S.areas.length === 1) selectArea(S.areas[0].id);
     else openSheet('areas', 'Lupa-alueet', renderAreasSheet);
+    var announced = announceNewAreas(fresh);
+    S.indexChecked = Date.now();
     // Päivitysilmoitus tallennetuille alueille
     var stale = S.areas.filter(function (a) { return offline[a.id] && offline[a.id].version !== a.version; });
-    if (stale.length && navigator.onLine) toast('Karttapäivitys saatavilla: ' + stale.map(function (a) { return a.name; }).join(', '),
+    if (!announced && stale.length && navigator.onLine) toast('Karttapäivitys saatavilla: ' + stale.map(function (a) { return a.name; }).join(', '),
       { label: 'Näytä', fn: function () { openSheet('areas', 'Lupa-alueet', renderAreasSheet); } });
     if (settings.gpsOn) startWatch();
     setPlayIcon(false);
@@ -2197,6 +2231,19 @@
   }
   $('obsBtn').addEventListener('click', function () { S.obsDraft = null; openSheet('obs-new', 'Uusi merkintä', renderObsForm); });
 
+  // Puhelin pitää sovelluksen usein muistissa: tarkistetaan uudet alueet myös sovellukseen palattaessa.
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible' || !navigator.onLine || !S.indexChecked || Date.now() - S.indexChecked < 30 * 60000) return;
+    S.indexChecked = Date.now();
+    var prevIds = S.areas.map(function (a) { return a.id; });
+    loadIndex().then(function () {
+      var fresh = checkNewAreas().filter(function (a) { return prevIds.indexOf(a.id) < 0 || S.newAreas[a.id]; });
+      if (S.area) { var cur = findArea(S.area.id); if (cur) S.area = cur; }
+      announceNewAreas(fresh);
+      if (currentSheet && currentSheet.name === 'areas') renderSheet();
+    });
+  });
+
   renderObsMarkers();
   updateSun();
   updateScent();
@@ -2204,5 +2251,6 @@
 
   window.__mk = { S: S, settings: settings, map: map, selectArea: selectArea, offline: function () { return offline; },
     refreshWind: refreshWind, currentWind: currentWind, refreshRain: refreshRain,
-    obs: function () { return obsList; }, onOrientation: onOrientation, startCompass: startCompass, updateSun: updateSun };
+    obs: function () { return obsList; }, onOrientation: onOrientation, startCompass: startCompass, updateSun: updateSun,
+    loadIndex: loadIndex, checkNewAreas: checkNewAreas };
 })();

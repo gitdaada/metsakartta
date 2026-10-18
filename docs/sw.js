@@ -1,7 +1,7 @@
 /* Metsäkartan service worker: pitää sovelluksen ja tallennetut kartat käytettävissä ilman verkkoa. */
 'use strict';
 
-var SHELL_CACHE = 'mk-shell-2026-10-18b';
+var SHELL_CACHE = 'mk-shell-2026-10-18c';
 var TILE_CACHE = 'mk-tiles-v1';
 var DATA_CACHE = 'mk-data-v1';
 var SHELL = [

@@ -340,3 +340,7 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 36px; }
 .stepper { display: flex; align-items: center; gap: 6px; }
 .stepper .btn { min-width: 44px; min-height: 40px; padding: 0; font-size: 20px; }
 .stepper-n { width: 60px; text-align: center; min-height: 40px; padding: 0 4px; }
+
+/* --- Uusi alue --- */
+.badge-new { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--accent); color: var(--accent-ink);
+  font-size: 11.5px; font-weight: 800; vertical-align: 2px; }

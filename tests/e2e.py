@@ -571,6 +571,21 @@ def main():
         print("TAIMIKKO:", tp)
         page.wait_for_timeout(1200)
         page.screenshot(path=str(SHOTS / "11-taimikko.png"))
+        # Uusien alueiden ilmoitus: alue, jota ei ole aiemmin nähty
+        page.evaluate("localStorage.setItem('mk_knownAreas', '[]')")
+        page.reload()
+        page.wait_for_selector("#toast:not([hidden])")
+        tt = page.inner_text("#toast")
+        print("UUSI ALUE:", tt.replace("\n", " "))
+        assert tt.startswith("Uusi alue tarjolla: 9999 Testialue"), tt
+        page.click("#toast button")
+        page.wait_for_selector(".badge-new")
+        assert "9999-testialue" in page.evaluate("localStorage.getItem('mk_knownAreas')")
+        page.screenshot(path=str(SHOTS / "26-uusi-alue.png"))
+        page.reload()
+        page.wait_for_function("() => window.__mk && window.__mk.S.forest", timeout=15000)
+        page.wait_for_timeout(800)
+        assert "Uusi alue" not in (page.inner_text("#toast") if page.is_visible("#toast") else "")
         ctx.set_offline(False)
         browser.close()
 
