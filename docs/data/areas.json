@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-17T13:14:23Z",
+ "generated": "2026-10-18T17:15:27Z",
  "encoding": 1,
  "mvmiYear": 2023,
  "attribution": [
@@ -40,21 +40,36 @@
      "sumR": 5164054,
      "sumG": 6198803
     },
-    "file": "data/jahti/forest.png?v=2e4a36e57648"
+    "file": "data/jahti/forest.png?v=2dacaf7c11ec"
    },
    "protectedCount": 2,
-   "built": "2026-10-17T13:14:23Z",
-   "version": "2e4a36e57648",
-   "bytes": 216708,
-   "boundary": "data/jahti/boundary.geojson?v=2e4a36e57648",
-   "protected": "data/jahti/protected.geojson?v=2e4a36e57648",
-   "cuts": "data/jahti/cuts.geojson?v=2e4a36e57648",
+   "built": "2026-10-18T17:15:27Z",
+   "version": "2dacaf7c11ec",
+   "bytes": 397412,
+   "boundary": "data/jahti/boundary.geojson?v=2dacaf7c11ec",
+   "protected": "data/jahti/protected.geojson?v=2dacaf7c11ec",
+   "habitat": "data/jahti/habitat.png?v=2dacaf7c11ec",
+   "habitatHa": {
+    "metso": [
+     414,
+     204
+    ],
+    "teeri": [
+     396,
+     151
+    ],
+    "pyy": [
+     275,
+     86
+    ]
+   },
+   "cuts": "data/jahti/cuts.geojson?v=2dacaf7c11ec",
    "cutsCount": 32,
-   "declCount": 80,
+   "declCount": 81,
    "chmYears": [
     2025
    ],
-   "srcHash": "edb6c20a6f73",
+   "srcHash": "c487c9c377b5",
    "source": "areas/jahti.json"
   },
   {
@@ -89,21 +104,36 @@
      "sumR": 7899004,
      "sumG": 11829982
     },
-    "file": "data/0000-testialue/forest.png?v=e5244d95f9f3"
+    "file": "data/0000-testialue/forest.png?v=85eb82164823"
    },
    "protectedCount": 13,
-   "built": "2026-10-17T13:13:48Z",
-   "version": "e5244d95f9f3",
-   "bytes": 259360,
-   "boundary": "data/0000-testialue/boundary.geojson?v=e5244d95f9f3",
-   "protected": "data/0000-testialue/protected.geojson?v=e5244d95f9f3",
-   "cuts": "data/0000-testialue/cuts.geojson?v=e5244d95f9f3",
+   "built": "2026-10-18T17:14:45Z",
+   "version": "85eb82164823",
+   "bytes": 527591,
+   "boundary": "data/0000-testialue/boundary.geojson?v=85eb82164823",
+   "protected": "data/0000-testialue/protected.geojson?v=85eb82164823",
+   "habitat": "data/0000-testialue/habitat.png?v=85eb82164823",
+   "habitatHa": {
+    "metso": [
+     675,
+     257
+    ],
+    "teeri": [
+     231,
+     99
+    ],
+    "pyy": [
+     585,
+     181
+    ]
+   },
+   "cuts": "data/0000-testialue/cuts.geojson?v=85eb82164823",
    "cutsCount": 15,
    "declCount": 17,
    "chmYears": [
     2025
    ],
-   "srcHash": "bd0547f29f4c",
+   "srcHash": "9fabaae3354f",
    "source": "areas/0000-testialue.geojson"
   }
  ]
