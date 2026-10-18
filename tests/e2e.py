@@ -72,7 +72,9 @@ def fmi_xml(dir_deg=225.0, spd=4.2, gust=8.1):
     members = []
     for i in range(62):
         t = (t0 + dt.timedelta(hours=i)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        for name, val in (("WindDirection", dir_deg + i), ("WindSpeedMS", spd), ("WindGust", gust)):
+        for name, val in (("WindDirection", dir_deg + i), ("WindSpeedMS", spd), ("WindGust", gust),
+                          ("Temperature", 8.0 + (14 if 10 <= i <= 14 else 0)), ("Humidity", 85.0 - (50 if 10 <= i <= 14 else 0)),
+                          ("Precipitation1h", 0.0)):
             members.append(f"""<wfs:member><BsWfs:BsWfsElement gml:id="e{i}{name}"><BsWfs:Location><gml:Point gml:id="p" srsName="http://www.opengis.net/def/crs/EPSG/0/4258"><gml:pos>61.24 25.10 </gml:pos></gml:Point></BsWfs:Location><BsWfs:Time>{t}</BsWfs:Time><BsWfs:ParameterName>{name}</BsWfs:ParameterName><BsWfs:ParameterValue>{val}</BsWfs:ParameterValue></BsWfs:BsWfsElement></wfs:member>""")
     return ('<?xml version="1.0" encoding="UTF-8"?><wfs:FeatureCollection timeStamp="x" numberMatched="1" numberReturned="1" '
             'xmlns:wfs="http://www.opengis.net/wfs/2.0" xmlns:gml="http://www.opengis.net/gml/3.2" xmlns:BsWfs="http://xml.fmi.fi/schema/wfs/2.0">'
@@ -263,6 +265,25 @@ def main():
         assert 40 <= fan["bearing"] <= 50 and fan["down25"] > fan["down60"] > 0 and fan["up"] == 0 and fan["side"] == 0, fan
         page.screenshot(path=str(SHOTS / "12-tuuliviuhka.png"))
 
+        # Aurinko ja hajuolosuhteet
+        page.wait_for_selector("#sunChip:not([hidden])")
+        sun = page.inner_text("#sunChip")
+        print("AURINKO:", sun)
+        import re as _re
+        assert _re.search(r"(Nousee|Laskee|Hämärä) \d{1,2}\.\d{2} · ", sun), sun
+        page.click("#sunChip")
+        stxt = page.inner_text("#sheetBody")
+        assert "Auringonnousu" in stxt and "Auringonlasku" in stxt and "sijaintisi" in stxt, stxt
+        page.click("#sheetClose")
+        page.wait_for_selector("#scentChip:not([hidden])")
+        print("HAJU:", page.inner_text("#scentChip"))
+        assert page.inner_text("#scentChip").strip() == "Haju: hyvä"
+        page.click("#scentChip")
+        htxt = page.inner_text("#sheetBody")
+        print("HAJUPANEELI:", htxt.split("\n")[0:3])
+        assert "Hajuolosuhteet: hyvä" in htxt and "8 °C" in htxt and "heikko" in htxt, htxt   # iltapäivän kuiva ja lämmin jakso
+        page.click("#sheetClose")
+
         # Kartan kääntö kahdella sormella (CDP-kosketustapahtumat)
         cdp = ctx.new_cdp_session(page)
 
@@ -283,11 +304,12 @@ def main():
 
         b_small = twist(8)
         print("KÄÄNTÖ 8°:", round(b_small, 1))
-        assert abs(b_small) < 0.5 and page.is_hidden("#compassBtn"), b_small          # kynnys estää vahingossa kääntymisen
+        assert abs(b_small) < 0.5, b_small          # kynnys estää vahingossa kääntymisen
+        assert page.get_attribute("#compassBtn", "aria-label") == "Käännä kartta katsomasuuntaan"
         b_big = twist(50)
         print("KÄÄNTÖ 50°:", round(b_big, 1))
         assert 25 <= abs(b_big) <= 45, b_big
-        assert page.is_visible("#compassBtn")
+        assert page.get_attribute("#compassBtn", "aria-label") == "Käännä pohjoinen ylös"
         fan2 = page.evaluate("""() => {
           const lay = window.__mk.S.layers.wind, f = lay._fan, map = window.__mk.map, c = lay._canvas;
           const dpr = c.width / map.getSize().x, ctx = c.getContext('2d');
@@ -308,7 +330,22 @@ def main():
         page.click(".info-close")
         page.click("#compassBtn")
         page.wait_for_timeout(300)
-        assert abs(page.evaluate("window.__mk.map.getBearing()")) < 0.5 and page.is_hidden("#compassBtn")
+        assert abs(page.evaluate("window.__mk.map.getBearing()")) < 0.5
+        # Kompassiseuranta: puhelimen suunta 270° (länteen) -> kartan kääntö 90°
+        assert page.is_visible("#compassBtn")                   # kompassiseuranta päällä asetuksissa
+        page.click("#compassBtn")
+        for _ in range(6):
+            page.evaluate("window.dispatchEvent(new DeviceOrientationEvent('deviceorientationabsolute', {alpha: 90, beta: 35, gamma: 0, absolute: true}))")
+            page.wait_for_timeout(80)
+        bc = page.evaluate("window.__mk.map.getBearing()")
+        print("KOMPASSI 270°: kartan kääntö", round(bc, 1), "seuranta", page.evaluate("window.__mk.S.compass.on"))
+        assert abs(bc - 90) < 2 and "follow" in page.get_attribute("#compassBtn", "class"), bc
+        page.screenshot(path=str(SHOTS / "20-kompassi.png"))
+        twist(40)                                                # käsin kääntö lopettaa seurannan
+        assert not page.evaluate("window.__mk.S.compass.on")
+        page.click("#compassBtn")
+        page.wait_for_timeout(200)
+        assert abs(page.evaluate("window.__mk.map.getBearing()")) < 0.5
         page.click("#windBtn")
         page.wait_for_selector(".wind-now")
         wtxt = page.inner_text("#sheetBody")
@@ -380,6 +417,80 @@ def main():
         page.wait_for_function("() => window.__mk.S.layers.rain && !window.__mk.S.rainLoading", timeout=30000)
         page.click("#sheetClose")
 
+        # Havainnot ja saalis
+        page.click("#obsBtn")
+        page.wait_for_selector("text=Oma sijainti (±")
+        page.click("#sheetBody button:has-text('Teeri')")
+        page.click("#sheetBody button:has-text('Saalis')")
+        page.click("#sheetBody button:has-text('Koiras')")
+        page.fill("input[aria-label='Lisätieto']", "Seisoi koivikossa <img src=x onerror=alert(5)>")
+        page.click("#sheetBody button:has-text('Tallenna')")
+        page.wait_for_function("() => window.__mk.obs().length === 1")
+        ob = page.evaluate("window.__mk.obs()[0]")
+        print("MERKINTÄ:", {k: ob[k] for k in ("laji", "tyyppi", "n", "sp", "note", "area")})
+        assert ob["laji"] == "teeri" and ob["tyyppi"] == "saalis" and ob["sp"] == "koiras" and abs(ob["lat"] - 61.2395) < 0.001
+        # Toinen merkintä kartalta valitusta kohdasta
+        page.click("#obsBtn")
+        page.click("text=Valitse kartalta")
+        page.wait_for_selector("#sheet", state="hidden")
+        page.mouse.click(120, 330)
+        page.wait_for_selector("text=Kartalta valittu kohta")
+        page.click("#sheetBody button:has-text('Metso')")
+        page.click("#sheetBody button:has-text('Seisonta')")
+        page.click("#sheetBody button:has-text('Tallenna')")
+        page.wait_for_function("() => window.__mk.obs().length === 2")
+        assert page.evaluate("document.querySelectorAll('.obs-pin').length") >= 2
+        page.click(".obs-pin.obs-saalis")
+        page.wait_for_selector("#infoCard:not([hidden]) .obs-del")
+        oinfo = page.inner_text("#infoCard")
+        print("MERKINNÄN TIEDOT:", oinfo.replace("\n", " | "))
+        assert "Teeri · Saalis" in oinfo and "<img src=x" in oinfo and "koiras" in oinfo
+        assert page.evaluate("document.querySelectorAll('#infoCard img').length") == 0
+        page.screenshot(path=str(SHOTS / "21-merkinta.png"))
+        page.click(".info-close")
+        page.click("#obsBtn")
+        page.click("text=Kaikki merkinnät (2)")
+        ltxt = page.inner_text("#sheetBody")
+        print("SAALISYHTEENVETO:", [l for l in ltxt.split("\n") if l.startswith("Teeri")][:1])
+        assert "Teeri 1 (1 koiras)" in ltxt and "Metso · Seisonta" in ltxt, ltxt
+        page.screenshot(path=str(SHOTS / "22-saalis.png"))
+        page.click("#sheetClose")
+
+        # Elinympäristö: metso
+        page.click("#layersBtn")
+        page.click("#sheetBody .seg button:has-text('Metso')")
+        page.wait_for_function("() => window.__mk.S.hab && window.__mk.map.hasLayer && document.querySelector('.leaflet-habitat-pane canvas')", timeout=10000)
+        page.click("#sheetClose")
+        hp = page.evaluate("""() => {
+          const S = window.__mk.S, F = S.forest, map = window.__mk.map, b = map.getBounds();
+          for (let sy = 5; sy < F.h - 5; sy += 2) for (let sx = 5; sx < F.w - 5; sx += 2) {
+            const i = sy * F.w + sx;
+            if (S.hab.metso[i] >= 200) {
+              const ll = MK.mercToLonLat(F.mx0 + (sx + 0.5) * F.rx, F.my1 - (sy + 0.5) * F.ry);
+              const p = map.latLngToContainerPoint([ll[1], ll[0]]);
+              if (b.contains([ll[1], ll[0]]) && p.y > 160 && p.y < 520 && p.x > 90 && p.x < 300) return {x: p.x, y: p.y};
+            }
+          }
+          return null; }""")
+        assert hp, "metson elinympäristöä ei näkymässä"
+        page.mouse.click(hp["x"], hp["y"])
+        page.wait_for_selector("#infoCard:not([hidden])")
+        hinfo = page.inner_text("#infoCard")
+        print("ELINYMPÄRISTÖ:", hinfo.replace("\n", " | "))
+        assert "Metson elinympäristö: hyvä" in hinfo, hinfo
+        page.screenshot(path=str(SHOTS / "23-metso.png"))
+        page.click(".info-close")
+        page.click("#layersBtn")
+        page.click("#sheetBody .seg button:has-text('Pois')")
+        page.click("#sheetClose")
+
+        # Asetuksissa toimintojen yhteenveto
+        page.click("#settingsBtn")
+        ftxt = page.inner_text("#sheetBody")
+        assert "toiminnot" in ftxt.lower() and "Kanalintujen elinympäristö: metso, teeri ja pyy" in ftxt and "Koiran hajuolosuhteet" in ftxt, ftxt[:300]
+        page.screenshot(path=str(SHOTS / "24-toiminnot.png"))
+        page.click("#sheetClose")
+
         # Offline-tallennus
         page.click("#areaBtn")
         page.wait_for_selector(".area-card")
@@ -392,7 +503,7 @@ def main():
         print("TALLENNETTU:", json.dumps(rec), "tiilipyyntöjä", len(TILE_REQUESTS) - n_before)
         assert rec["failed"] == 0 and rec["tiles"] > 50, rec
         cached = page.evaluate("caches.open('mk-data-v1').then(c => c.keys()).then(ks => ks.map(k => k.url))")
-        assert any("cuts.geojson" in u for u in cached), cached
+        assert any("cuts.geojson" in u for u in cached) and any("habitat.png" in u for u in cached), cached
         page.screenshot(path=str(SHOTS / "06-tallennettu.png"))
         page.click("#sheetClose")
 

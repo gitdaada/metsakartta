@@ -31,6 +31,7 @@
     apiKey: '', basemap: 'maastokartta', oldAge: 80, taimikkoM: 7, treelessM: 0.5, maxZoom: 16, offlineOrtho: false,
     wakeLock: false, opacity: 0.7, showForest: true, showProtected: true, showMask: true, gpsOn: false,
     showWind: true, fanLengthM: 200, showRain: true, showCuts: true,
+    habitat: 'off', showSun: true, showScent: true, showObs: true, compassFeature: true,
     mmlBase: ''
   };
   function num(v, d, min, max) { v = Number(v); return isFinite(v) ? Math.max(min, Math.min(max, v)) : d; }
@@ -43,8 +44,9 @@
     s.treelessM = num(s.treelessM, DEFAULTS.treelessM, 0, 3);
     s.maxZoom = s.maxZoom === 15 ? 15 : 16;
     s.opacity = num(s.opacity, DEFAULTS.opacity, 0.2, 1);
-    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn', 'showWind', 'showRain', 'showCuts'].forEach(function (k) { s[k] = !!s[k]; });
+    ['offlineOrtho', 'wakeLock', 'showForest', 'showProtected', 'showMask', 'gpsOn', 'showWind', 'showRain', 'showCuts', 'showSun', 'showScent', 'showObs', 'compassFeature'].forEach(function (k) { s[k] = !!s[k]; });
     s.fanLengthM = [100, 200, 300, 500].indexOf(Number(s.fanLengthM)) >= 0 ? Number(s.fanLengthM) : DEFAULTS.fanLengthM;
+    s.habitat = ['off', 'metso', 'teeri', 'pyy'].indexOf(s.habitat) >= 0 ? s.habitat : 'off';
     s.mmlBase = typeof s.mmlBase === 'string' ? s.mmlBase : '';
     return s;
   }
@@ -133,6 +135,7 @@
   }
   makePane('maskPane', 300);
   makePane('forestPane', 350);
+  makePane('habitatPane', 360);
   makePane('cutsPane', 400);
   makePane('protCasingPane', 410);
   makePane('protPane', 420);
@@ -288,6 +291,8 @@
         '<li><span class="sw sw-line"></span>Lupa-alueen raja</li>' +
         (settings.showWind ? '<li><span class="sw sw-wind"></span>Tuuliviuhka (hajusi kulku)</li>' : '') +
         (settings.showRain ? '<li><span class="sw sw-rain"></span><span>Sade 0–2 h<small>heikko → kova</small></span></li>' : '') +
+        (settings.showObs && obsList && obsList.length ? '<li><span class="sw sw-obs"><i class="obs-havainto"></i><i class="obs-seisonta"></i><i class="obs-saalis"></i></span><span>Omat merkinnät<small>havainto, seisonta, saalis</small></span></li>' : '') +
+        (settings.habitat !== 'off' ? '<li><span class="sw sw-hab2"></span><span>' + HAB_NAMES[settings.habitat] + 'n elinympäristö<small>vahva = hyvä, haalea = sopiva</small></span></li>' : '') +
         (settings.showCuts ? '<li><span class="sw sw-cut"></span><span>Uusi hakkuuaukko<small>' + ((S.index && S.index.mvmiYear) || 2023) + ' jälkeen, latvusmalli tai ilmakuva</small></span></li>' +
           '<li><span class="sw sw-cut-dash"></span><span>Hakkuuilmoitus<small>toteutuminen ei varmaa</small></span></li>' : '') +
         '</ul>';
@@ -367,7 +372,8 @@
     ['mask', 'mask2', 'boundaryCasing', 'boundary', 'protCasing', 'prot', 'cutsCasing', 'cuts'].forEach(function (k) {
       if (S.layers[k]) { map.removeLayer(S.layers[k]); S.layers[k] = null; }
     });
-    S.forest = null; S.stats = null; S.cutsGJ = null;
+    S.forest = null; S.stats = null; S.cutsGJ = null; S.hab = null; S.habArea = null;
+    if (map.hasLayer(habitatLayer)) map.removeLayer(habitatLayer);
     if (map.hasLayer(forestLayer)) map.removeLayer(forestLayer);
     closeInfo();
   }
@@ -446,6 +452,7 @@
           S.forest = F;
           refreshForest();
           applyLayerVisibility();
+          ensureHabitat();
         });
       })
       .catch(function (e) {
@@ -465,6 +472,7 @@
   }
 
   map.on('click', function (e) {
+    if (S.pickingObs) { pickObsLocation(e.latlng); return; }
     if (!S.area) return;
     var ll = e.latlng;
     var info = null;
@@ -528,6 +536,9 @@
       extra.push('<div class="tag"><span class="sw sw-dash"></span><span><b>Suojelualue</b>' +
         (p.nimi ? ': ' + esc(p.nimi) : '') + (p.tyyppi ? ' <span class="muted">(' + esc(p.tyyppi) + ')</span>' : '') + '</span></div>');
     });
+    var hl = habitatAt(ll);
+    if (hl) extra.push('<div class="tag"><span class="sw sw-hab' + hl.level + '"></span><span><b>' + esc(HAB_NAMES[hl.species]) +
+      'n elinympäristö</b>: ' + (hl.level === 2 ? 'hyvä' : 'sopiva') + ' <span class="muted">(suuntaa antava malli)</span></span></div>');
     if (info && !inside) extra.push('<div class="warn-text">Lupa-alueen ulkopuolella</div>');
     if (extra.length) html += '<div class="info-extra">' + extra.join('') + '</div>';
     var meta = [ll.lat.toFixed(5).replace('.', ',') + ' N, ' + ll.lng.toFixed(5).replace('.', ',') + ' E'];
@@ -549,14 +560,75 @@
   // Kartan kääntäminen
   // ---------------------------------------------------------------------------
 
+  function isRotated() { var b = bearing(); return Math.abs(((b % 360) + 540) % 360 - 180) > 0.5; }
   function updateCompass() {
     var b = bearing(), btn = $('compassBtn');
-    var off = Math.abs(((b % 360) + 540) % 360 - 180) > 0.5;
-    btn.hidden = !off;
+    btn.hidden = !CAN_ROTATE || !(isRotated() || S.compass.on || settings.compassFeature);
+    btn.classList.toggle('follow', S.compass.on);
+    btn.setAttribute('aria-pressed', String(S.compass.on));
+    btn.setAttribute('aria-label', S.compass.on ? 'Lopeta kompassiseuranta' : (isRotated() ? 'Käännä pohjoinen ylös' : 'Käännä kartta katsomasuuntaan'));
     btn.querySelector('svg').style.transform = 'rotate(' + Math.round(b) + 'deg)';
   }
+
+  // Kompassiseuranta: kartta kääntyy puhelimen yläreunan suuntaan (laitteen kompassi).
+  S.compass = { on: false, smooth: null, last: 0, got: 0, setting: false };
+  function screenAngle() {
+    var o = window.screen && window.screen.orientation;
+    return o && typeof o.angle === 'number' ? o.angle : (typeof window.orientation === 'number' ? window.orientation : 0);
+  }
+  function onOrientation(e) {
+    if (!S.compass.on) return;
+    if (e.type === 'deviceorientation' && !e.absolute && typeof e.webkitCompassHeading !== 'number') return;
+    var hd = MK.compassHeading(e, screenAngle());
+    if (hd === null) return;
+    S.compass.got = Date.now();
+    S.compass.smooth = S.compass.smooth === null ? hd : MK.norm360(S.compass.smooth + MK.angleDiff(S.compass.smooth, hd) * 0.3);
+    var now = Date.now();
+    if (now - S.compass.last < 66) return;
+    var target = MK.norm360(-S.compass.smooth);
+    if (Math.abs(MK.angleDiff(bearing(), target)) < 1) return;
+    S.compass.last = now;
+    S.compass.setting = true;
+    try { map.setBearing(target); } finally { S.compass.setting = false; }
+  }
+  var ORIENT_EVENT = ('ondeviceorientationabsolute' in window) ? 'deviceorientationabsolute' : 'deviceorientation';
+  function listenOrientation(on) {
+    window.removeEventListener(ORIENT_EVENT, onOrientation);
+    if (on) window.addEventListener(ORIENT_EVENT, onOrientation);
+  }
+  function startCompass() {
+    var ask = (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') ?
+      DeviceOrientationEvent.requestPermission().catch(function () { return 'denied'; }) : Promise.resolve('granted');
+    return ask.then(function (res) {
+      if (res !== 'granted') { toast('Kompassin käyttölupaa ei saatu.'); return; }
+      S.compass.on = true; S.compass.smooth = null; S.compass.got = 0;
+      listenOrientation(true);
+      updateCompass();
+      toast('Kartta kääntyy katsomasuuntaasi.');
+      setTimeout(function () {
+        if (S.compass.on && !S.compass.got) { stopCompass(); toast('Puhelimen kompassia ei saatu käyttöön.'); }
+      }, 3000);
+    });
+  }
+  function stopCompass() {
+    S.compass.on = false;
+    listenOrientation(false);
+    updateCompass();
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (S.compass.on) listenOrientation(document.visibilityState === 'visible');
+  });
+  function onManualRotate() {
+    if (S.compass.on) { stopCompass(); toast('Kompassiseuranta lopetettu.'); }
+  }
   if (CAN_ROTATE) {
-    $('compassBtn').addEventListener('click', function () { map.setBearing(0); });
+    $('compassBtn').addEventListener('click', function () {
+      if (S.compass.on) { stopCompass(); map.setBearing(0); }
+      else if (isRotated()) map.setBearing(0);
+      else if (settings.compassFeature) startCompass();
+      updateCompass();
+    });
+    updateCompass();
     map.on('rotate', function () {
       updateCompass();
       updateWindUi();
@@ -592,6 +664,7 @@
         }
         // Kynnys ylitetty: aloitetaan kääntö tästä asennosta (sama laskenta kuin laajennuksessa).
         this._mkFree = true;
+        onManualRotate();
         this._startTheta = Math.atan(g.v.x / g.v.y);
         this._startBearing = map.getBearing();
         if (g.v.y < 0) this._startBearing += 180;
@@ -733,7 +806,7 @@
     layers.forEach(function (l) {
       MK.listTiles(a.forest.bounds, OFFLINE_ZMIN, settings.maxZoom, TILE_PAD_DEG).forEach(function (t) { tiles.push([l, t[0], t[1], t[2]]); });
     });
-    var dataUrls = [a.forest.file, a.boundary, a.protected, a.cuts].filter(Boolean).map(absUrl);
+    var dataUrls = [a.forest.file, a.boundary, a.protected, a.cuts, a.habitat].filter(Boolean).map(absUrl);
     var job = { ctrl: new AbortController(), done: 0, failed: 0, total: tiles.length + dataUrls.length, authFail: 0, corsFail: 0, ok: 0, areaId: a.id, ui: ui };
     S.dl = job;
     job.ui.start(job);
@@ -1001,6 +1074,24 @@
       if (v) refreshRain(true); else stopRainPlay();
       updateRainUi();
     }));
+
+    body.appendChild(h('h3', { text: 'Kanalintujen elinympäristö' }));
+    var hseg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Elinympäristö' });
+    [['off', 'Pois'], ['metso', 'Metso'], ['teeri', 'Teeri'], ['pyy', 'Pyy']].forEach(function (o) {
+      hseg.appendChild(h('button', { type: 'button', 'aria-pressed': String(settings.habitat === o[0]), text: o[1],
+        onclick: function () { settings.habitat = o[0]; saveSettings(); ensureHabitat(); renderLegend(); renderSheet(); } }));
+    });
+    body.appendChild(hseg);
+    body.appendChild(h('p', { class: 'muted small', text: S.area && !S.area.habitat ? 'Tälle alueelle ei ole vielä laskettu elinympäristöä.' :
+      'Suuntaa antava malli metsätiedosta: puulajit, ikä, latvuspeitto, kasvupaikka ja hakkuut. Vahva väri = hyvä, haalea = sopiva.' }));
+
+    body.appendChild(h('h3', { text: 'Jahtiapurit' }));
+    body.appendChild(toggleRow('Aurinko', 'Nousu, lasku ja aikaa niihin sijainnissasi', settings.showSun, function (v) { settings.showSun = v; saveSettings(); updateSun(); }));
+    body.appendChild(toggleRow('Koiran hajuolosuhteet', 'Arvio lämpötilasta, kosteudesta ja tuulesta', settings.showScent, function (v) { settings.showScent = v; saveSettings(); updateScent(); }));
+    body.appendChild(toggleRow('Havainnot ja saalis', 'Merkinnät tallentuvat vain tähän puhelimeen', settings.showObs, function (v) { settings.showObs = v; saveSettings(); renderObsMarkers(); }));
+    body.appendChild(toggleRow('Kompassiseuranta', 'Kompassipainikkeesta kartta kääntyy katsomasuuntaasi', settings.compassFeature, function (v) {
+      settings.compassFeature = v; saveSettings(); if (!v && S.compass.on) { stopCompass(); map.setBearing(0); } updateCompass();
+    }));
   }
 
   function toggleRow(label, hint, value, onChange) {
@@ -1052,6 +1143,9 @@
     body.appendChild(h('button', { type: 'button', class: 'btn btn-danger', text: 'Poista kaikki offline-kartat', onclick: function () {
       if (confirm('Poistetaanko kaikki tallennetut kartat tästä laitteesta?')) clearAllOffline().then(function () { toast('Offline-kartat poistettu.'); renderSheet(); });
     } }));
+
+    body.appendChild(h('h3', { text: 'Toiminnot' }));
+    body.appendChild(h('ul', { class: 'feature-list' }, FEATURES.map(function (f) { return h('li', { text: f }); })));
 
     body.appendChild(h('h3', { text: 'Tietolähteet' }));
     var attrib = (S.index && S.index.attribution) || [];
@@ -1140,7 +1234,8 @@
 
   function fetchOpenMeteo(lat, lon) {
     var q = 'latitude=' + lat + '&longitude=' + lon +
-      '&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=ms&timezone=GMT&past_hours=1&forecast_hours=60';
+      '&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m,relative_humidity_2m,precipitation' +
+      '&wind_speed_unit=ms&timezone=GMT&past_hours=1&forecast_hours=60';
     return fetchWithTimeout(OPEN_METEO + '?' + q, 15000).then(function (r) {
       if (!r.ok) throw new Error('Open-Meteo HTTP ' + r.status);
       return r.json();
@@ -1156,11 +1251,16 @@
     a = a || S.area; opts = opts || {};
     if (!a || S.windLoading || !navigator.onLine) return Promise.resolve(false);
     var cached = store.get(windKey(a), null);
-    if (!opts.force && cached && Date.now() - cached.fetched < WIND_MAX_AGE) return Promise.resolve(false);
+    var hasWx = cached && cached.series && cached.series.length && cached.series[0].temp !== undefined;
+    if (!opts.force && cached && hasWx && Date.now() - cached.fetched < WIND_MAX_AGE) return Promise.resolve(false);
     var pt = windPoint(a), src = 'fmi';
     S.windLoading = true;
     updateWindUi({ noFan: true });
-    return fetchFmi(pt[0], pt[1], 'WindDirection,WindSpeedMS,WindGust')
+    return fetchFmi(pt[0], pt[1], 'WindDirection,WindSpeedMS,WindGust,Temperature,Humidity,Precipitation1h')
+      .catch(function (e) {
+        if (/^FMI:/.test(e.message)) return fetchFmi(pt[0], pt[1], 'WindDirection,WindSpeedMS,WindGust');
+        throw e;
+      })
       .catch(function (e) {
         if (/^FMI:/.test(e.message)) return fetchFmi(pt[0], pt[1], 'WindDirection,WindSpeedMS');
         throw e;
@@ -1181,7 +1281,7 @@
         if (opts.force) toast('Tuuliennustetta ei saatu: ' + (e && e.message));
         return false;
       })
-      .then(function (ok) { S.windLoading = false; updateWindUi(); return ok; });
+      .then(function (ok) { S.windLoading = false; updateWindUi(); updateScent(); return ok; });
   }
 
   function currentWind() {
@@ -1578,7 +1678,8 @@
 
   function applyForestOpacity() {
     var dim = !!(S.layers.rain && S.rain && S.rain.anyRain);
-    forestLayer.setOpacity(settings.opacity * (dim ? 0.75 : 1));
+    var hab = settings.habitat !== 'off' && !!S.hab;
+    forestLayer.setOpacity(settings.opacity * (dim ? 0.75 : 1) * (hab ? 0.55 : 1));
   }
 
   function drawRain() {
@@ -1736,6 +1837,365 @@
   });
 
   // Testejä varten
+  // ---------------------------------------------------------------------------
+  // Toimintojen yhteenveto (asetuksissa)
+  // ---------------------------------------------------------------------------
+
+  var FEATURES = [
+    'Metsän ikä värikoodattuna (puuton, nuori, vanha) ja taimikot vinoviivoin',
+    'Luonnonsuojelualueet ja lupa-alueen raja',
+    'Uudet hakkuuaukot latvusmallista ja hakkuuilmoitukset',
+    'Kanalintujen elinympäristö: metso, teeri ja pyy',
+    'Oma sijainti ja kulkusuunta',
+    'Tuulen suunta ja hajuviuhka sijainnistasi',
+    'Sade-ennuste 0–2 h sijaintisi ympäriltä',
+    'Koiran hajuolosuhteet sääennusteesta',
+    'Auringon nousu ja lasku sekä aikaa niihin',
+    'Havaintojen ja saaliin kirjaus sekä saalisyhteenveto',
+    'Kartan kääntö kahdella sormella ja kompassiseuranta',
+    'Pisteen tiedot napauttamalla: ikä, pituus, suojelu, hakkuu, elinympäristö',
+    'Maastokartta, ilmakuva tai OpenStreetMap pohjakarttana',
+    'Offline-käyttö tallennetuilla alueilla',
+    'Näyttö päällä -tila'
+  ];
+
+  // ---------------------------------------------------------------------------
+  // Kanalintujen elinympäristö
+  // ---------------------------------------------------------------------------
+
+  var HAB_NAMES = { metso: 'Metso', teeri: 'Teeri', pyy: 'Pyy' };
+  var HAB_COLORS = [MK.packRGBA(255, 159, 26, 92), MK.packRGBA(255, 128, 0, 178)];
+  var HabitatLayer = L.GridLayer.extend({
+    options: { pane: 'habitatPane', tileSize: 256, maxZoom: 20, updateWhenZooming: false, keepBuffer: 2 },
+    createTile: function (coords) {
+      var t = L.DomUtil.create('canvas', 'forest-tile');
+      var sz = this.getTileSize();
+      t.width = sz.x; t.height = sz.y;
+      var hab = S.hab && S.hab[settings.habitat];
+      if (!S.forest || !hab) return t;
+      var ctx = t.getContext('2d');
+      var img = ctx.createImageData(sz.x, sz.y);
+      var out = new Uint32Array(img.data.buffer);
+      if (MK.renderHabitatTile(S.forest, hab, coords.x, coords.y, coords.z, out, HAB_COLORS, sz.x)) ctx.putImageData(img, 0, 0);
+      return t;
+    }
+  });
+  var habitatLayer = new HabitatLayer();
+
+  function ensureHabitat() {
+    var a = S.area, want = settings.habitat !== 'off' && a && a.habitat && S.forest;
+    if (!want) {
+      if (map.hasLayer(habitatLayer)) map.removeLayer(habitatLayer);
+      applyForestOpacity();
+      return Promise.resolve();
+    }
+    var ready = S.hab && S.habArea === a.id ? Promise.resolve() :
+      fetch(a.habitat).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+        .then(function (blob) { return decodeImage(blob, a.forest); })
+        .then(function (dec) {
+          if (S.area !== a) return;
+          if (dec.code.length !== S.forest.w * S.forest.h) throw new Error('Elinympäristön ruudukko ei täsmää');
+          S.hab = { metso: dec.code, teeri: dec.ht, pyy: dec.bl }; S.habArea = a.id;
+        });
+    return ready.then(function () {
+      if (S.area !== a) return;
+      if (!map.hasLayer(habitatLayer)) habitatLayer.addTo(map);
+      habitatLayer.redraw();
+      applyForestOpacity();
+    }).catch(function (e) {
+      console.warn('Elinympäristöä ei saatu:', e && e.message);
+      if (!navigator.onLine && !offline[a.id]) toast('Elinympäristö vaatii verkon tai offline-tallennuksen.');
+    });
+  }
+
+  function habitatAt(ll) {
+    if (settings.habitat === 'off' || !S.hab || !S.forest) return null;
+    var m = MK.lonLatToMerc(ll.lng, ll.lat), i = MK.sampleIndex(S.forest, m[0], m[1]);
+    if (i < 0) return null;
+    var lv = MK.habitatLevel(S.hab[settings.habitat][i]);
+    return lv ? { species: settings.habitat, level: lv } : null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Aurinko
+  // ---------------------------------------------------------------------------
+
+  var SUN_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="#fbbf24"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="#fbbf24" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  var MOON_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" fill="#c7d2fe"/></svg>';
+  function sunPoint() {
+    if (S.pos && Date.now() - S.pos.timestamp < 30 * 60000) return { lat: S.pos.coords.latitude, lon: S.pos.coords.longitude, src: 'gps' };
+    if (S.area) return { lat: S.area.center[0], lon: S.area.center[1], src: 'area' };
+    var c = map.getCenter();
+    return { lat: c.lat, lon: c.lng, src: 'map' };
+  }
+  function fmtDur(ms) {
+    var m = Math.max(0, Math.round(ms / 60000));
+    if (m < 1) return 'alle min';
+    if (m < 60) return m + ' min';
+    return Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+  }
+  function updateSun() {
+    var chip = $('sunChip');
+    if (!settings.showSun) { chip.hidden = true; return; }
+    var p = sunPoint(), now = Date.now(), st = MK.sunStatus(now, p.lat, p.lon), txt, icon = SUN_ICON;
+    if (st.polar === 'day') txt = 'Aurinko ei laske';
+    else if (st.polar === 'night') { txt = 'Aurinko ei nouse'; icon = MOON_ICON; }
+    else if (st.kind === 'rise') { txt = 'Nousee ' + hm(st.at) + ' · ' + fmtDur(st.at - now); icon = MOON_ICON; }
+    else if (st.kind === 'set') txt = 'Laskee ' + hm(st.at) + ' · ' + fmtDur(st.at - now);
+    else { txt = 'Hämärä ' + hm(st.at) + ' asti · ' + fmtDur(st.at - now); icon = MOON_ICON; }
+    chip.innerHTML = icon + '<span></span>';
+    chip.querySelector('span').textContent = txt;
+    chip.hidden = false;
+    if (currentSheet && currentSheet.name === 'sun') renderSheet();
+  }
+  function renderSunSheet(body) {
+    var p = sunPoint(), now = Date.now(), st = MK.sunStatus(now, p.lat, p.lon), T = st.today, N = st.tomorrow;
+    function row(label, val) { return h('div', { class: 'kv' }, h('span', { text: label }), h('b', { text: val })); }
+    if (T.polar) body.appendChild(h('p', { text: T.polar === 'day' ? 'Aurinko ei laske tänään.' : 'Aurinko ei nouse tänään.' }));
+    else {
+      body.appendChild(row('Auringonnousu', hm(T.rise) + (now < T.rise ? ' (' + fmtDur(T.rise - now) + ')' : '')));
+      body.appendChild(row('Auringonlasku', hm(T.set) + (now < T.set ? ' (' + fmtDur(T.set - now) + ')' : ' (laskenut)')));
+      if (now >= T.rise && now < T.set) body.appendChild(row('Valoisaa jäljellä', fmtDur(T.set - now)));
+      if (T.dawn) body.appendChild(row('Hämärä alkaa aamulla', hm(T.dawn)));
+      if (T.dusk) body.appendChild(row('Hämärä päättyy illalla', hm(T.dusk) + (now < T.dusk && now >= T.set ? ' (' + fmtDur(T.dusk - now) + ')' : '')));
+      if (N.rise) body.appendChild(row('Huomenna', 'nousu ' + hm(N.rise) + ', lasku ' + hm(N.set)));
+    }
+    body.appendChild(h('p', { class: 'muted small', text: 'Laskettu ' + (p.src === 'gps' ? 'sijaintisi' : (p.src === 'area' ? 'lupa-alueen keskipisteen' : 'kartan keskikohdan')) +
+      ' mukaan puhelimessa, tarkkuus noin minuutti. Hämärä = aurinko alle 6° horisontin alla.' }));
+  }
+  $('sunChip').addEventListener('click', function () { openSheet('sun', 'Aurinko', renderSunSheet); });
+
+  // ---------------------------------------------------------------------------
+  // Koiran hajuolosuhteet
+  // ---------------------------------------------------------------------------
+
+  var SCENT_COLORS = { 'hyvä': '#22c55e', 'kohtalainen': '#f59e0b', 'heikko': '#ef4444' };
+  function weatherAt(t) {
+    if (!S.wind || !S.wind.series) return null;
+    var e = MK.pickWind(S.wind.series, t);
+    return e && e.temp !== null && e.temp !== undefined ? e : null;
+  }
+  function updateScent() {
+    var chip = $('scentChip');
+    if (!settings.showScent) { chip.hidden = true; return; }
+    var w = weatherAt(Date.now()), ix = w && MK.scentIndex(w);
+    if (!ix) { chip.hidden = true; return; }
+    chip.innerHTML = '<i class="dot"></i><span></span>';
+    chip.querySelector('.dot').style.background = SCENT_COLORS[ix.level];
+    chip.querySelector('span').textContent = 'Haju: ' + ix.level;
+    chip.hidden = false;
+    if (currentSheet && currentSheet.name === 'scent') renderSheet();
+  }
+  function renderScentSheet(body) {
+    var now = Date.now(), w = weatherAt(now), ix = w && MK.scentIndex(w);
+    if (!ix) { body.appendChild(h('p', { text: 'Sääennustetta ei ole saatavilla.' })); return; }
+    body.appendChild(h('div', { class: 'scent-now' },
+      h('i', { class: 'dot big', style: 'background:' + SCENT_COLORS[ix.level] }),
+      h('div', null, h('div', { class: 'wind-title', text: 'Hajuolosuhteet: ' + ix.level }),
+        h('div', { class: 'muted', text: fmt1(w.temp) + ' °C · kosteus ' + Math.round(w.rh) + ' % · tuuli ' + (w.spd !== null ? fmt1(w.spd) + ' m/s' : '–') }))));
+    body.appendChild(h('p', { text: ix.notes.join(', ').replace(/^./, function (c) { return c.toUpperCase(); }) + '.' }));
+    var p = sunPoint(), day = MK.sunTimes(MK.localNoon(now, 0), p.lat, p.lon);
+    var list = h('div', { class: 'wind-list' }), best = null;
+    (S.wind.series || []).filter(function (e) { return e.t >= now - 30 * 60000 && e.t <= now + 12 * 3600000; }).forEach(function (e) {
+      var x = MK.scentIndex(e);
+      if (!x) return;
+      var light = !day.rise || (e.t >= day.rise && e.t <= day.set);
+      if (light && (!best || x.score > best.x.score)) best = { e: e, x: x };
+      list.appendChild(h('div', { class: 'wind-row scent-row' },
+        h('span', { class: 'wind-t', text: hm(e.t) }),
+        h('i', { class: 'dot', style: 'background:' + SCENT_COLORS[x.level] }),
+        h('span', { text: x.level + ' · ' + fmt1(e.temp) + ' °C, ' + Math.round(e.rh) + ' %, ' + (e.spd !== null ? fmt1(e.spd) + ' m/s' : '–') })));
+    });
+    if (best) body.appendChild(h('p', null, h('b', { text: 'Paras valoisa aika seuraavien 12 h aikana: ' }), document.createTextNode('klo ' + hm(best.e.t) + ' (' + best.x.level + ')')));
+    body.appendChild(list);
+    body.appendChild(h('p', { class: 'muted small', text: 'Suuntaa antava arvio lupa-alueen sääennusteesta (' + (S.wind.source === 'fmi' ? 'Ilmatieteen laitos' : 'Open-Meteo') +
+      '). Viileä ja kostea sää sekä kohtalainen tuuli kantavat hajua yleensä parhaiten; helle, kuivuus, kova tuuli ja tyyni heikentävät.' }));
+  }
+  $('scentChip').addEventListener('click', function () { openSheet('scent', 'Koiran hajuolosuhteet', renderScentSheet); });
+
+  // ---------------------------------------------------------------------------
+  // Havainnot ja saalis (vain tässä laitteessa)
+  // ---------------------------------------------------------------------------
+
+  var OBS_SPECIES = [['metso', 'Metso', 'M'], ['teeri', 'Teeri', 'T'], ['pyy', 'Pyy', 'P'], ['riekko', 'Riekko', 'R'], ['muu', 'Muu', '?']];
+  var OBS_TYPES = [['havainto', 'Havainto'], ['seisonta', 'Seisonta'], ['saalis', 'Saalis']];
+  var OBS_SEX = [['', 'Ei tiedossa'], ['koiras', 'Koiras'], ['naaras', 'Naaras']];
+  function obsName(list, key) { for (var i = 0; i < list.length; i++) if (list[i][0] === key) return list[i][1]; return key; }
+  function sanitizeObs(o) {
+    if (!o || typeof o !== 'object') return null;
+    var lat = Number(o.lat), lon = Number(o.lon);
+    if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    return {
+      id: String(o.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 20) || Math.random().toString(36).slice(2),
+      t: Number(o.t) || Date.now(), lat: lat, lon: lon, acc: isFinite(Number(o.acc)) ? Math.round(Number(o.acc)) : null,
+      laji: OBS_SPECIES.some(function (s) { return s[0] === o.laji; }) ? o.laji : 'muu',
+      tyyppi: OBS_TYPES.some(function (s) { return s[0] === o.tyyppi; }) ? o.tyyppi : 'havainto',
+      n: Math.max(1, Math.min(99, Math.round(Number(o.n) || 1))),
+      sp: OBS_SEX.some(function (s) { return s[0] === o.sp; }) ? o.sp : '',
+      note: typeof o.note === 'string' ? o.note.slice(0, 120) : '',
+      area: typeof o.area === 'string' ? o.area.slice(0, 80) : ''
+    };
+  }
+  var obsList = (store.get('obs', []) || []).map(sanitizeObs).filter(Boolean);
+  function saveObs() { store.set('obs', obsList); }
+  var obsLayer = L.layerGroup();
+
+  function renderObsMarkers() {
+    $('obsBtn').hidden = !settings.showObs;
+    if (legendOpen) renderLegend();
+    obsLayer.clearLayers();
+    if (!settings.showObs) { if (map.hasLayer(obsLayer)) map.removeLayer(obsLayer); return; }
+    if (!map.hasLayer(obsLayer)) obsLayer.addTo(map);
+    obsList.forEach(function (o) {
+      var sp = OBS_SPECIES.filter(function (s) { return s[0] === o.laji; })[0];
+      var m = L.marker([o.lat, o.lon], { keyboard: false, bubblingMouseEvents: false, title: obsName(OBS_SPECIES, o.laji) + ', ' + obsName(OBS_TYPES, o.tyyppi),
+        icon: L.divIcon({ className: '', iconSize: [0, 0], html: '<div class="obs-pin obs-' + o.tyyppi + '">' + (sp ? sp[2] : '?') + '</div>' }) });
+      m.on('click', function () { showObsInfo(o); });
+      obsLayer.addLayer(m);
+    });
+  }
+
+  function showObsInfo(o) {
+    var card = $('infoCard');
+    var when = new Date(o.t);
+    var html = '<div class="info-row"><span class="obs-pin obs-' + o.tyyppi + ' obs-pin-static">' + esc((OBS_SPECIES.filter(function (s) { return s[0] === o.laji; })[0] || ['', '', '?'])[2]) + '</span>' +
+      '<div><div class="info-title">' + esc(obsName(OBS_SPECIES, o.laji) + ' · ' + obsName(OBS_TYPES, o.tyyppi)) + '</div>' +
+      '<div class="info-detail">' + esc(fmtDate(o.t) + ' klo ' + hm(o.t) + ' · ' + o.n + ' kpl' + (o.sp ? ' · ' + obsName(OBS_SEX, o.sp).toLowerCase() : '')) + '</div>' +
+      (o.note ? '<div class="info-detail">' + esc(o.note) + '</div>' : '') +
+      '</div><button type="button" class="info-close" aria-label="Sulje"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button></div>';
+    var meta = [o.lat.toFixed(5).replace('.', ',') + ' N, ' + o.lon.toFixed(5).replace('.', ',') + ' E'];
+    if (o.area) meta.push(o.area);
+    if (S.pos) {
+      var d = map.distance([o.lat, o.lon], [S.pos.coords.latitude, S.pos.coords.longitude]);
+      meta.push('Sinusta ' + (d < 1000 ? fmtInt(d) + ' m' : (d / 1000).toFixed(1).replace('.', ',') + ' km'));
+    }
+    html += '<div class="info-meta">' + meta.map(function (m) { return '<span>' + esc(m) + '</span>'; }).join('') + '</div>' +
+      '<div class="btn-row"><button type="button" class="btn btn-danger obs-del">Poista merkintä</button></div>';
+    card.innerHTML = html;
+    card.hidden = false;
+    card.querySelector('.info-close').addEventListener('click', closeInfo);
+    card.querySelector('.obs-del').addEventListener('click', function () {
+      if (!confirm('Poistetaanko merkintä?')) return;
+      obsList = obsList.filter(function (x) { return x.id !== o.id; });
+      saveObs(); renderObsMarkers(); closeInfo(); toast('Merkintä poistettu.');
+    });
+    if (S.tapMarker) { map.removeLayer(S.tapMarker); S.tapMarker = null; }
+  }
+
+  S.obsDraft = null;
+  function newDraft() {
+    var gps = S.pos && Date.now() - S.pos.timestamp < 120000;
+    return { laji: 'metso', tyyppi: 'havainto', n: 1, sp: '', note: '',
+      loc: gps ? { lat: S.pos.coords.latitude, lon: S.pos.coords.longitude, acc: S.pos.coords.accuracy, src: 'gps' } : null };
+  }
+  function segRow(label, list, key) {
+    var seg = h('div', { class: 'seg seg-wrap', role: 'group', 'aria-label': label });
+    list.forEach(function (o) {
+      seg.appendChild(h('button', { type: 'button', 'aria-pressed': String(S.obsDraft[key] === o[0]), text: o[1],
+        onclick: function () { S.obsDraft[key] = o[0]; renderSheet(); } }));
+    });
+    return h('div', { class: 'field' }, h('span', { class: 'label', text: label }), seg);
+  }
+  function renderObsForm(body) {
+    var d = S.obsDraft || (S.obsDraft = newDraft());
+    var locTxt = d.loc ? (d.loc.src === 'gps' ? 'Oma sijainti' + (isFinite(d.loc.acc) && d.loc.acc !== null ? ' (±' + fmtInt(d.loc.acc) + ' m)' : '') : 'Kartalta valittu kohta') +
+      ' · ' + d.loc.lat.toFixed(5).replace('.', ',') + ' N, ' + d.loc.lon.toFixed(5).replace('.', ',') + ' E' : 'Paikkaa ei ole valittu';
+    body.appendChild(h('div', { class: 'field' }, h('span', { class: 'label', text: 'Paikka' }), h('div', { class: d.loc ? '' : 'warn-text', text: locTxt }),
+      h('div', { class: 'btn-row' },
+        h('button', { type: 'button', class: 'btn', text: 'Oma sijainti', disabled: !S.pos, onclick: function () {
+          d.loc = { lat: S.pos.coords.latitude, lon: S.pos.coords.longitude, acc: S.pos.coords.accuracy, src: 'gps' }; renderSheet(); } }),
+        h('button', { type: 'button', class: 'btn', text: 'Valitse kartalta', onclick: function () {
+          S.pickingObs = true; closeSheet(); toast('Napauta karttaa merkinnän kohdalla.', null, 6000); } }))));
+    body.appendChild(segRow('Laji', OBS_SPECIES, 'laji'));
+    body.appendChild(segRow('Tyyppi', OBS_TYPES, 'tyyppi'));
+    var n = h('input', { class: 'input', type: 'number', inputmode: 'numeric', min: '1', max: '99', value: String(d.n), 'aria-label': 'Määrä' });
+    n.addEventListener('change', function () { d.n = Math.max(1, Math.min(99, Math.round(Number(n.value) || 1))); n.value = String(d.n); });
+    body.appendChild(h('div', { class: 'field' }, h('span', { class: 'label', text: 'Määrä' }), n));
+    body.appendChild(segRow('Sukupuoli', OBS_SEX, 'sp'));
+    var note = h('input', { class: 'input', type: 'text', maxlength: '120', value: d.note, placeholder: 'Lisätieto (valinnainen)', 'aria-label': 'Lisätieto' });
+    note.addEventListener('input', function () { d.note = note.value.slice(0, 120); });
+    body.appendChild(h('div', { class: 'field' }, note));
+    body.appendChild(h('div', { class: 'btn-row' },
+      h('button', { type: 'button', class: 'btn btn-primary', text: 'Tallenna', disabled: !d.loc, onclick: function () {
+        var o = sanitizeObs({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), t: Date.now(), lat: d.loc.lat, lon: d.loc.lon,
+          acc: d.loc.src === 'gps' ? d.loc.acc : null, laji: d.laji, tyyppi: d.tyyppi, n: d.n, sp: d.sp, note: d.note, area: S.area ? S.area.name : '' });
+        obsList.push(o); saveObs(); S.obsDraft = null; closeSheet(); renderObsMarkers();
+        toast('Tallennettu: ' + obsName(OBS_SPECIES, o.laji) + ', ' + obsName(OBS_TYPES, o.tyyppi).toLowerCase() + '.');
+      } }),
+      h('button', { type: 'button', class: 'btn', text: 'Kaikki merkinnät (' + obsList.length + ')', onclick: function () { openSheet('obs-list', 'Havainnot ja saalis', renderObsList); } })));
+  }
+  function pickObsLocation(ll) {
+    S.pickingObs = false;
+    if (!S.obsDraft) S.obsDraft = newDraft();
+    S.obsDraft.loc = { lat: ll.lat, lon: ll.lng, acc: null, src: 'map' };
+    openSheet('obs-new', 'Uusi merkintä', renderObsForm);
+  }
+  function seasonStart(now) {
+    var d = new Date(now), y = d.getMonth() >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+    return { t: new Date(y, 7, 1).getTime(), label: y + '–' + (y + 1) };
+  }
+  function catchSummary() {
+    var se = seasonStart(Date.now()), by = {};
+    obsList.filter(function (o) { return o.tyyppi === 'saalis' && o.t >= se.t; }).forEach(function (o) {
+      var k = o.laji, b = by[k] || (by[k] = { n: 0, koiras: 0, naaras: 0, areas: {} });
+      b.n += o.n; if (o.sp) b[o.sp] += o.n; if (o.area) b.areas[o.area] = (b.areas[o.area] || 0) + o.n;
+    });
+    var lines = Object.keys(by).map(function (k) {
+      var b = by[k], sx = [];
+      if (b.koiras) sx.push(b.koiras + ' koiras'); if (b.naaras) sx.push(b.naaras + ' naaras');
+      return obsName(OBS_SPECIES, k) + ' ' + b.n + (sx.length ? ' (' + sx.join(', ') + ')' : '') +
+        (Object.keys(b.areas).length ? ' – ' + Object.keys(b.areas).map(function (a) { return a + ' ' + b.areas[a]; }).join(', ') : '');
+    });
+    return { label: se.label, lines: lines };
+  }
+  function csvCell(v) {
+    var s = String(v === null || v === undefined ? '' : v);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;      // ei kaavoja taulukko-ohjelmassa
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  function renderObsList(body) {
+    var sm = catchSummary();
+    body.appendChild(h('h3', { text: 'Saalis kaudella ' + sm.label }));
+    body.appendChild(sm.lines.length ? h('ul', { class: 'feature-list' }, sm.lines.map(function (l) { return h('li', { text: l }); })) :
+      h('p', { class: 'muted', text: 'Ei saalismerkintöjä tällä kaudella.' }));
+    var row = h('div', { class: 'btn-row' });
+    if (sm.lines.length) row.appendChild(h('button', { type: 'button', class: 'btn', text: 'Kopioi yhteenveto', onclick: function () {
+      var txt = 'Saalis ' + sm.label + ':\n' + sm.lines.join('\n');
+      (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(function () { toast('Yhteenveto kopioitu.'); },
+        function () { toast('Kopiointi ei onnistunut.'); });
+    } }));
+    if (obsList.length) row.appendChild(h('button', { type: 'button', class: 'btn', text: 'Lataa CSV', onclick: function () {
+      var rows = [['aika', 'laji', 'tyyppi', 'maara', 'sukupuoli', 'lat', 'lon', 'tarkkuus_m', 'alue', 'lisatieto']].concat(obsList.map(function (o) {
+        return [new Date(o.t).toISOString(), o.laji, o.tyyppi, o.n, o.sp, o.lat.toFixed(6), o.lon.toFixed(6), o.acc === null ? '' : o.acc, o.area, o.note];
+      }));
+      var blob = new Blob(['﻿' + rows.map(function (r) { return r.map(csvCell).join(';'); }).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      var a = h('a', { href: URL.createObjectURL(blob), download: 'metsakartta-merkinnat.csv' });
+      document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    } }));
+    row.appendChild(h('button', { type: 'button', class: 'btn btn-primary', text: 'Uusi merkintä', onclick: function () { S.obsDraft = null; openSheet('obs-new', 'Uusi merkintä', renderObsForm); } }));
+    body.appendChild(row);
+    body.appendChild(h('h3', { text: 'Merkinnät (' + obsList.length + ')' }));
+    obsList.slice().sort(function (a, b) { return b.t - a.t; }).slice(0, 200).forEach(function (o) {
+      body.appendChild(h('div', { class: 'obs-row' },
+        h('span', { class: 'obs-pin obs-pin-static obs-' + o.tyyppi, text: (OBS_SPECIES.filter(function (s) { return s[0] === o.laji; })[0] || ['', '', '?'])[2] }),
+        h('div', { class: 'obs-txt' }, h('b', { text: obsName(OBS_SPECIES, o.laji) + ' · ' + obsName(OBS_TYPES, o.tyyppi) + (o.n > 1 ? ' · ' + o.n : '') }),
+          h('small', { text: fmtDate(o.t) + ' klo ' + hm(o.t) + (o.area ? ' · ' + o.area : '') + (o.note ? ' · ' + o.note : '') })),
+        h('button', { type: 'button', class: 'btn', text: 'Näytä', onclick: function () { closeSheet(); map.setView([o.lat, o.lon], Math.max(map.getZoom(), 15)); showObsInfo(o); } })));
+    });
+    if (obsList.length) body.appendChild(h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn btn-danger', text: 'Poista kaikki merkinnät', onclick: function () {
+      if (!confirm('Poistetaanko kaikki merkinnät tästä puhelimesta?')) return;
+      obsList = []; saveObs(); renderObsMarkers(); renderSheet(); toast('Merkinnät poistettu.');
+    } })));
+    body.appendChild(h('p', { class: 'muted small', text: 'Merkinnät tallentuvat vain tähän puhelimeen eivätkä lähde minnekään. Saalisilmoitus tehdään erikseen eräluvat.fi-palvelussa.' }));
+  }
+  $('obsBtn').addEventListener('click', function () { S.obsDraft = null; openSheet('obs-new', 'Uusi merkintä', renderObsForm); });
+
+  renderObsMarkers();
+  updateSun();
+  updateScent();
+  setInterval(function () { updateSun(); updateScent(); }, 30000);
+
   window.__mk = { S: S, settings: settings, map: map, selectArea: selectArea, offline: function () { return offline; },
-    refreshWind: refreshWind, currentWind: currentWind, refreshRain: refreshRain };
+    refreshWind: refreshWind, currentWind: currentWind, refreshRain: refreshRain,
+    obs: function () { return obsList; }, onOrientation: onOrientation, startCompass: startCompass, updateSun: updateSun };
 })();

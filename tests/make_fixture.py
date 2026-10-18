@@ -82,12 +82,20 @@ def main(dest: Path):
     inside = outer & ~inner
     r[~inside] = 0
     g[~inside] = 0
+    # Synteettinen elinympäristö: metso vanhassa metsässä, teeri nuorissa ja aukoilla, pyy keski-ikäisessä
+    ok = (age < 32766) & inside
+    hm = np.where(ok, np.clip((age - 70) * 6, 0, 255), 0).astype(np.uint8)
+    htr = np.where(ok & (age < 25), 230, np.where(ok & cut, 150, 0)).astype(np.uint8)
+    hp = np.where(ok & (age >= 35) & (age < 70), 200, 0).astype(np.uint8)
+    r0, r1, c0, c1 = build.content_window(r)
     rr, gg, cx0, cy1 = build.crop_to_content(r, g, x0, y1, res)
+    hab = [b[r0:r1, c0:c1] for b in (hm, htr, hp)]
 
     aid = "9999-testialue"
     out = data / aid
     out.mkdir()
     build.write_forest_png(out / "forest.png", rr, gg)
+    build.write_forest_png(out / "habitat.png", *hab)
     meta = build.forest_meta(rr, gg, cx0, cy1, res)
     boundary = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"nimi": "Testialue"},
                 "geometry": {"type": "Polygon", "coordinates": [ring, hole]}}]}
@@ -110,7 +118,7 @@ def main(dest: Path):
          "geometry": {"type": "Polygon", "coordinates": box(25.128, 61.2225, 25.140, 61.2265)}},
     ]}
     (out / "cuts.geojson").write_text(json.dumps(cuts, ensure_ascii=False))
-    files = [(out / f).read_bytes() for f in ("forest.png", "boundary.geojson", "protected.geojson", "cuts.geojson")]
+    files = [(out / f).read_bytes() for f in ("forest.png", "boundary.geojson", "protected.geojson", "cuts.geojson", "habitat.png")]
     ver = build.sha1_bytes(*files)[:12]
     entry = {
         "id": aid, "name": "9999 Testialue<script>alert(2)</script>", "areaHa": 1450, "center": [61.238, 25.1], "version": ver,
@@ -119,6 +127,7 @@ def main(dest: Path):
         "boundary": f"data/{aid}/boundary.geojson?v={ver}",
         "protected": f"data/{aid}/protected.geojson?v={ver}",
         "cuts": f"data/{aid}/cuts.geojson?v={ver}", "cutsCount": 1, "declCount": 2, "chmYears": [2025],
+        "habitat": f"data/{aid}/habitat.png?v={ver}", "habitatHa": {"metso": [100, 200], "teeri": [50, 60], "pyy": [30, 40]},
         "protectedCount": 1, "built": "2026-10-15T07:00:00Z",
     }
     index = {"generated": "2026-10-15T07:00:00Z", "encoding": 1, "mvmiYear": 2023,

@@ -98,13 +98,13 @@
   /** Purkaa getImageData-datan koodiksi ja pituudeksi sekä laskee tarkistussummat. */
   function decodeRGB(data, w, h) {
     var n = w * h;
-    var code = new Uint8Array(n), ht = new Uint8Array(n);
-    var sumR = 0, sumG = 0;
+    var code = new Uint8Array(n), ht = new Uint8Array(n), bl = new Uint8Array(n);
+    var sumR = 0, sumG = 0, sumB = 0;
     for (var i = 0, j = 0; i < n; i++, j += 4) {
-      code[i] = data[j]; ht[i] = data[j + 1];
-      sumR += data[j]; sumG += data[j + 1];
+      code[i] = data[j]; ht[i] = data[j + 1]; bl[i] = data[j + 2];
+      sumR += data[j]; sumG += data[j + 1]; sumB += data[j + 2];
     }
-    return { code: code, ht: ht, sumR: sumR, sumG: sumG };
+    return { code: code, ht: ht, bl: bl, sumR: sumR, sumG: sumG, sumB: sumB };
   }
 
   /** forest = {code, ht, w, h, mx0, my0, mx1, my1, rx, ry} */
@@ -282,10 +282,13 @@
       var name = ((el.getElementsByTagNameNS('*', 'ParameterName')[0] || {}).textContent || '').trim();
       var val = cleanNum(((el.getElementsByTagNameNS('*', 'ParameterValue')[0] || {}).textContent || '').trim());
       if (!isFinite(t)) continue;
-      var e = byT[t] || (byT[t] = { t: t, dir: null, spd: null, gust: null });
+      var e = byT[t] || (byT[t] = { t: t, dir: null, spd: null, gust: null, temp: null, rh: null, prec: null });
       if (name === 'WindDirection') e.dir = val;
       else if (name === 'WindSpeedMS') e.spd = val;
       else if (name === 'WindGust') e.gust = val;
+      else if (name === 'Temperature') e.temp = val;
+      else if (name === 'Humidity') e.rh = val;
+      else if (name === 'Precipitation1h') e.prec = val;
     }
     return Object.keys(byT).map(function (k) { return byT[k]; })
       .filter(function (e) { return e.dir !== null; })
@@ -301,7 +304,9 @@
       var t = Date.parse(hr.time[i] + (/Z$|[+-]\d\d:?\d\d$/.test(hr.time[i]) ? '' : 'Z'));
       var dir = cleanNum(hr.wind_direction_10m && hr.wind_direction_10m[i]);
       if (!isFinite(t) || dir === null) continue;
-      out.push({ t: t, dir: dir, spd: cleanNum(hr.wind_speed_10m && hr.wind_speed_10m[i]), gust: cleanNum(hr.wind_gusts_10m && hr.wind_gusts_10m[i]) });
+      out.push({ t: t, dir: dir, spd: cleanNum(hr.wind_speed_10m && hr.wind_speed_10m[i]), gust: cleanNum(hr.wind_gusts_10m && hr.wind_gusts_10m[i]),
+                 temp: cleanNum(hr.temperature_2m && hr.temperature_2m[i]), rh: cleanNum(hr.relative_humidity_2m && hr.relative_humidity_2m[i]),
+                 prec: cleanNum(hr.precipitation && hr.precipitation[i]) });
     }
     return out;
   }
@@ -429,6 +434,150 @@
     return q < 0 ? url : url.slice(0, q);
   }
 
+
+  // --- Aurinko -----------------------------------------------------------------
+  // Auringon nousu ja lasku tähtitieteellisillä kaavoilla (NOAA; sama laskentatapa kuin SunCalc-kirjastossa).
+  // Tarkkuus noin minuutti. Toimii ilman verkkoa.
+
+  var RAD = Math.PI / 180, DAYMS = 86400000, J1970 = 2440588, J2000 = 2451545, OBL = RAD * 23.4397, J0 = 0.0009;
+  function toDays(ms) { return ms / DAYMS - 0.5 + J1970 - J2000; }
+  function fromJulian(j) { return (j + 0.5 - J1970) * DAYMS; }
+
+  /**
+   * Auringon tapahtumat sen vuorokauden osalta, jonka keskipäivä on lähinnä hetkeä ms (anna paikallinen keskipäivä).
+   * Palauttaa {noon, rise, set, dawn, dusk}; rise/set = null ja polar = 'day' | 'night', jos aurinko ei nouse tai laske.
+   * dawn/dusk = porvarillinen hämärä (aurinko 6° horisontin alla).
+   */
+  function sunTimes(ms, lat, lon) {
+    var lw = RAD * -lon, phi = RAD * lat, d = toDays(ms);
+    var n = Math.round(d - J0 - lw / (2 * Math.PI));
+    var ds = J0 + lw / (2 * Math.PI) + n;
+    var M = RAD * (357.5291 + 0.98560028 * ds);
+    var C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+    var L = M + C + RAD * 102.9372 + Math.PI;
+    var dec = Math.asin(Math.sin(OBL) * Math.sin(L));
+    var Jnoon = J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+    function at(h0) {
+      var cosH = (Math.sin(h0 * RAD) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+      if (cosH > 1) return { polar: 'night' };
+      if (cosH < -1) return { polar: 'day' };
+      var w = Math.acos(cosH);
+      var a = J0 + (w + lw) / (2 * Math.PI) + n;
+      var Jset = J2000 + a + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+      return { set: fromJulian(Jset), rise: fromJulian(Jnoon - (Jset - Jnoon)) };
+    }
+    var s = at(-0.833), c = at(-6);
+    return { noon: fromJulian(Jnoon), rise: s.rise || null, set: s.set || null, polar: s.polar || null,
+             dawn: c.rise || null, dusk: c.set || null };
+  }
+
+  /** Paikallinen keskipäivä päivälle, johon hetki ms kuuluu (+ dayOffset päivää). */
+  function localNoon(ms, dayOffset) {
+    var d = new Date(ms);
+    d.setHours(12, 0, 0, 0);
+    if (dayOffset) d.setDate(d.getDate() + dayOffset);
+    return d.getTime();
+  }
+
+  /**
+   * Seuraava auringon tapahtuma hetkestä now: {kind: 'rise'|'set'|'dusk', at, today, tomorrow, polar}.
+   * today/tomorrow = sunTimes-tulokset.
+   */
+  function sunStatus(now, lat, lon) {
+    var today = sunTimes(localNoon(now, 0), lat, lon), tomorrow = sunTimes(localNoon(now, 1), lat, lon);
+    var r = { today: today, tomorrow: tomorrow, kind: null, at: null, polar: today.polar };
+    if (today.polar) return r;
+    if (now < today.rise) { r.kind = 'rise'; r.at = today.rise; }
+    else if (now < today.set) { r.kind = 'set'; r.at = today.set; }
+    else if (today.dusk && now < today.dusk) { r.kind = 'dusk'; r.at = today.dusk; }
+    else if (tomorrow.rise) { r.kind = 'rise'; r.at = tomorrow.rise; r.nextDay = true; }
+    else r.polar = tomorrow.polar;
+    return r;
+  }
+
+  // --- Koiran hajuolosuhteet ---------------------------------------------------------
+  // Suuntaa antava arvio: viileä ja kostea sää sekä kohtalainen tuuli kantavat hajua parhaiten.
+  // Kuumuus, kuivuus, kova tuuli, tyyni, pakkanen ja rankkasade heikentävät.
+
+  function scentIndex(w) {
+    if (!w || w.temp === null || w.temp === undefined || w.rh === null || w.rh === undefined) return null;
+    var score = 100, notes = [], t = w.temp, rh = w.rh, v = w.spd, p = w.prec;
+    if (t < -5) { score -= 25; notes.push('pakkanen'); }
+    else if (t < 0) { score -= 10; notes.push('pakkasta'); }
+    else if (t > 25) { score -= 40; notes.push('helle'); }
+    else if (t > 20) { score -= 25; notes.push('lämmin'); }
+    else if (t > 15) { score -= 10; notes.push('lämpöä'); }
+    if (rh < 40) { score -= 30; notes.push('hyvin kuiva ilma'); }
+    else if (rh < 55) { score -= 15; notes.push('kuiva ilma'); }
+    if (v !== null && v !== undefined) {
+      if (v < 0.5) { score -= 20; notes.push('tyyntä, haju ei kulje'); }
+      else if (v < 1) { score -= 10; notes.push('lähes tyyntä'); }
+      else if (v > 9) { score -= 30; notes.push('kova tuuli hajottaa hajun'); }
+      else if (v > 6) { score -= 15; notes.push('navakka tuuli'); }
+    }
+    if (p !== null && p !== undefined && p > 2) { score -= 20; notes.push('runsas sade'); }
+    score = Math.max(0, Math.min(100, score));
+    var level = score >= 75 ? 'hyvä' : (score >= 50 ? 'kohtalainen' : 'heikko');
+    if (!notes.length) notes.push('viileää ja kosteaa, sopiva tuuli');
+    return { score: score, level: level, notes: notes };
+  }
+
+  // --- Kompassi --------------------------------------------------------------------
+
+  /**
+   * Laitteen yläreunan kompassisuunta (0 = pohjoinen, myötäpäivään) laitteen asentotiedoista.
+   * alpha = absoluuttinen kiertymä (deviceorientationabsolute), beta = kallistus, screenAngle = näytön kierto.
+   * iOS: webkitCompassHeading on valmiiksi kompassisuunta. Palauttaa null, jos suunta ei ole luotettava.
+   */
+  function compassHeading(e, screenAngle) {
+    var sa = Number(screenAngle) || 0;
+    if (e && typeof e.webkitCompassHeading === 'number' && isFinite(e.webkitCompassHeading)) return norm360(e.webkitCompassHeading + sa);
+    if (!e || typeof e.alpha !== 'number' || !isFinite(e.alpha)) return null;
+    if (typeof e.beta === 'number' && Math.abs(e.beta) > 80) return null; // pystyssä: yläreunan suunta epävakaa
+    return norm360(360 - e.alpha + sa);
+  }
+
+  /** Lyhin kulmaero b - a välillä -180...180. */
+  function angleDiff(a, b) { return ((b - a) % 360 + 540) % 360 - 180; }
+
+  // --- Elinympäristö ---------------------------------------------------------------
+
+  var HABITAT_LEVELS = [128, 191]; // 0,5 = sopiva, 0,75 = hyvä
+
+  /**
+   * Piirtää valitun lajin elinympäristön tiileen. hab = Uint8Array (0-255) samassa ruudukossa kuin metsärasteri.
+   * colors = [sopiva, hyvä] (packRGBA).
+   */
+  function renderHabitatTile(F, hab, x, y, z, out, colors, size) {
+    var S = size || 256;
+    var res = WORLD / (S * Math.pow(2, z));
+    var tx0 = x * S * res - HALF;
+    var ty0 = HALF - y * S * res;
+    if (tx0 > F.mx1 || tx0 + S * res < F.mx0 || ty0 < F.my0 || ty0 - S * res > F.my1) return false;
+    var cols = new Int32Array(S);
+    for (var px = 0; px < S; px++) {
+      var sx = Math.floor((tx0 + (px + 0.5) * res - F.mx0) / F.rx);
+      cols[px] = (sx >= 0 && sx < F.w) ? sx : -1;
+    }
+    var any = false, l0 = HABITAT_LEVELS[0], l1 = HABITAT_LEVELS[1];
+    for (var py = 0; py < S; py++) {
+      var sy = Math.floor((F.my1 - (ty0 - (py + 0.5) * res)) / F.ry);
+      if (sy < 0 || sy >= F.h) continue;
+      var base = sy * F.w, row = py * S;
+      for (px = 0; px < S; px++) {
+        var c0 = cols[px];
+        if (c0 < 0) continue;
+        var v = hab[base + c0];
+        if (v < l0) continue;
+        out[row + px] = v >= l1 ? colors[1] : colors[0];
+        any = true;
+      }
+    }
+    return any;
+  }
+
+  function habitatLevel(v) { return v >= HABITAT_LEVELS[1] ? 2 : (v >= HABITAT_LEVELS[0] ? 1 : 0); }
+
   root.MK = {
     EARTH_R: EARTH_R, WORLD: WORLD, COLORS: COLORS,
     packRGBA: packRGBA, ageColor: ageColor, buildPalette: buildPalette, cssRGB: cssRGB,
@@ -440,6 +589,9 @@
     destPoint: destPoint, fanBand: fanBand, parseFmiWind: parseFmiWind, parseOpenMeteoWind: parseOpenMeteoWind,
     pickWind: pickWind,
     rainGrid: rainGrid, parseNowcast: parseNowcast, rainFrames: rainFrames, rainColor: rainColor,
-    renderRain: renderRain, rainSummary: rainSummary, RAIN_STOPS: RAIN_STOPS
+    renderRain: renderRain, rainSummary: rainSummary, RAIN_STOPS: RAIN_STOPS,
+    sunTimes: sunTimes, sunStatus: sunStatus, localNoon: localNoon, scentIndex: scentIndex,
+    compassHeading: compassHeading, angleDiff: angleDiff,
+    renderHabitatTile: renderHabitatTile, habitatLevel: habitatLevel, HABITAT_LEVELS: HABITAT_LEVELS
   };
 })(typeof self !== 'undefined' ? self : this);
