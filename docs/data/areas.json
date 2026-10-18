@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-18T17:15:27Z",
+ "generated": "2026-10-18T18:33:20Z",
  "encoding": 1,
  "mvmiYear": 2023,
  "attribution": [
@@ -71,6 +71,320 @@
    ],
    "srcHash": "c487c9c377b5",
    "source": "areas/jahti.json"
+  },
+  {
+   "id": "jamijarvi",
+   "name": "Jämijärvi",
+   "areaHa": 1084,
+   "center": [
+    61.727219,
+    22.694274
+   ],
+   "forest": {
+    "width": 254,
+    "height": 275,
+    "res": 33.782,
+    "mercBounds": [
+     2521758.736,
+     8790650.694,
+     2530339.364,
+     8799940.744
+    ],
+    "bounds": [
+     [
+      61.709773,
+      22.653344
+     ],
+     [
+      61.7493,
+      22.730425
+     ]
+    ],
+    "checksum": {
+     "sumR": 2282561,
+     "sumG": 2781500
+    },
+    "file": "data/jamijarvi/forest.png?v=5e7eca3cad08"
+   },
+   "protectedCount": 0,
+   "built": "2026-10-18T18:22:45Z",
+   "version": "5e7eca3cad08",
+   "bytes": 157515,
+   "boundary": "data/jamijarvi/boundary.geojson?v=5e7eca3cad08",
+   "protected": "data/jamijarvi/protected.geojson?v=5e7eca3cad08",
+   "habitat": "data/jamijarvi/habitat.png?v=5e7eca3cad08",
+   "habitatHa": {
+    "metso": [
+     303,
+     155
+    ],
+    "teeri": [
+     144,
+     28
+    ],
+    "pyy": [
+     19,
+     3
+    ]
+   },
+   "cuts": "data/jamijarvi/cuts.geojson?v=5e7eca3cad08",
+   "cutsCount": 4,
+   "declCount": 30,
+   "chmYears": [
+    2024
+   ],
+   "srcHash": "4ae4cf419757",
+   "source": "areas/jämijärvi.json"
+  },
+  {
+   "id": "karsikko",
+   "name": "Karsikko",
+   "areaHa": 3895,
+   "center": [
+    63.581416,
+    25.586929
+   ],
+   "forest": {
+    "width": 433,
+    "height": 536,
+    "res": 35.955,
+    "mercBounds": [
+     2839186.575,
+     9233495.685,
+     2854755.09,
+     9252767.565
+    ],
+    "bounds": [
+     [
+      63.538373,
+      25.504847
+     ],
+     [
+      63.615412,
+      25.644701
+     ]
+    ],
+    "checksum": {
+     "sumR": 8878227,
+     "sumG": 9163403
+    },
+    "file": "data/karsikko/forest.png?v=b1310635dad1"
+   },
+   "protectedCount": 1,
+   "built": "2026-10-18T18:22:57Z",
+   "version": "b1310635dad1",
+   "bytes": 546306,
+   "boundary": "data/karsikko/boundary.geojson?v=b1310635dad1",
+   "protected": "data/karsikko/protected.geojson?v=b1310635dad1",
+   "habitat": "data/karsikko/habitat.png?v=b1310635dad1",
+   "habitatHa": {
+    "metso": [
+     835,
+     428
+    ],
+    "teeri": [
+     1038,
+     240
+    ],
+    "pyy": [
+     135,
+     23
+    ]
+   },
+   "cuts": "data/karsikko/cuts.geojson?v=b1310635dad1",
+   "cutsCount": 0,
+   "declCount": 100,
+   "srcHash": "bbf4292b078c",
+   "source": "areas/karsikko.json"
+  },
+  {
+   "id": "korpihovi",
+   "name": "Korpihovi",
+   "areaHa": 3635,
+   "center": [
+    63.479411,
+    25.94995
+   ],
+   "forest": {
+    "width": 425,
+    "height": 452,
+    "res": 35.834,
+    "mercBounds": [
+     2881017.766,
+     9210986.364,
+     2896247.216,
+     9227183.332
+    ],
+    "bounds": [
+     [
+      63.448129,
+      25.880623
+     ],
+     [
+      63.513095,
+      26.017431
+     ]
+    ],
+    "checksum": {
+     "sumR": 7151438,
+     "sumG": 8039821
+    },
+    "file": "data/korpihovi/forest.png?v=d85c94b5f090"
+   },
+   "protectedCount": 3,
+   "built": "2026-10-18T18:23:29Z",
+   "version": "d85c94b5f090",
+   "bytes": 561479,
+   "boundary": "data/korpihovi/boundary.geojson?v=d85c94b5f090",
+   "protected": "data/korpihovi/protected.geojson?v=d85c94b5f090",
+   "habitat": "data/korpihovi/habitat.png?v=d85c94b5f090",
+   "habitatHa": {
+    "metso": [
+     631,
+     367
+    ],
+    "teeri": [
+     1177,
+     318
+    ],
+    "pyy": [
+     136,
+     31
+    ]
+   },
+   "cuts": "data/korpihovi/cuts.geojson?v=d85c94b5f090",
+   "cutsCount": 34,
+   "declCount": 80,
+   "chmYears": [
+    2025
+   ],
+   "srcHash": "11411006b71d",
+   "source": "areas/korpihovi.json"
+  },
+  {
+   "id": "lansi-suomussalmi",
+   "name": "Länsi Suomussalmi",
+   "areaHa": 141606,
+   "center": [
+    65.043113,
+    28.663268
+   ],
+   "forest": {
+    "width": 2964,
+    "height": 2873,
+    "res": 37.908,
+    "mercBounds": [
+     3129229.584,
+     9562103.46,
+     3241588.896,
+     9671013.144
+    ],
+    "bounds": [
+     [
+      64.823768,
+      28.110348
+     ],
+     [
+      65.23676,
+      29.119689
+     ]
+    ],
+    "checksum": {
+     "sumR": 303859713,
+     "sumG": 254238398
+    },
+    "file": "data/lansi-suomussalmi/forest.png?v=8dee91b4e15f"
+   },
+   "protectedCount": 34,
+   "built": "2026-10-18T18:33:09Z",
+   "version": "8dee91b4e15f",
+   "bytes": 17690127,
+   "boundary": "data/lansi-suomussalmi/boundary.geojson?v=8dee91b4e15f",
+   "protected": "data/lansi-suomussalmi/protected.geojson?v=8dee91b4e15f",
+   "habitat": "data/lansi-suomussalmi/habitat.png?v=8dee91b4e15f",
+   "habitatHa": {
+    "metso": [
+     14296,
+     3064
+    ],
+    "teeri": [
+     44416,
+     10323
+    ],
+    "pyy": [
+     2844,
+     307
+    ]
+   },
+   "cuts": "data/lansi-suomussalmi/cuts.geojson?v=8dee91b4e15f",
+   "cutsCount": 73,
+   "declCount": 1627,
+   "chmYears": [
+    2024
+   ],
+   "srcHash": "e6a7f2a077b2",
+   "source": "areas/länsi-suomussalmi.json"
+  },
+  {
+   "id": "riikinhovi",
+   "name": "Riikinhovi",
+   "areaHa": 7112,
+   "center": [
+    63.848326,
+    26.080483
+   ],
+   "forest": {
+    "width": 677,
+    "height": 588,
+    "res": 36.298,
+    "mercBounds": [
+     2889792.674,
+     9299874.282,
+     2914366.42,
+     9321217.506
+    ],
+    "bounds": [
+     [
+      63.802844,
+      25.959449
+     ],
+     [
+      63.887358,
+      26.180199
+     ]
+    ],
+    "checksum": {
+     "sumR": 15845733,
+     "sumG": 14241471
+    },
+    "file": "data/riikinhovi/forest.png?v=bf1ce4f75592"
+   },
+   "protectedCount": 2,
+   "built": "2026-10-18T18:33:20Z",
+   "version": "bf1ce4f75592",
+   "bytes": 859562,
+   "boundary": "data/riikinhovi/boundary.geojson?v=bf1ce4f75592",
+   "protected": "data/riikinhovi/protected.geojson?v=bf1ce4f75592",
+   "habitat": "data/riikinhovi/habitat.png?v=bf1ce4f75592",
+   "habitatHa": {
+    "metso": [
+     1063,
+     888
+    ],
+    "teeri": [
+     2425,
+     852
+    ],
+    "pyy": [
+     97,
+     31
+    ]
+   },
+   "cuts": "data/riikinhovi/cuts.geojson?v=bf1ce4f75592",
+   "cutsCount": 0,
+   "declCount": 73,
+   "srcHash": "a1155ccc8af3",
+   "source": "areas/riikinhovi.json"
   },
   {
    "id": "0000-testialue",
