@@ -330,3 +330,13 @@ input[type="range"] { width: 100%; accent-color: var(--accent); height: 36px; }
 .feature-list { margin: 4px 0 8px; padding-left: 20px; display: grid; gap: 4px; font-size: 14.5px; }
 .sw-obs { display: flex; gap: 2px; border: 0; background: none; align-items: center; }
 .sw-obs i { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #fff; }
+
+/* --- Merkintälomake: mahtuu yhdelle näytölle --- */
+.obs-form .field { margin: 8px 0; gap: 4px; }
+.obs-form .field .label { font-size: 14px; }
+.seg-compact { grid-auto-flow: column; grid-auto-columns: 1fr; }
+.seg-compact button { min-height: 40px; font-size: 13.5px; padding: 0 2px; }
+.field-inline { display: flex; align-items: center; justify-content: space-between; }
+.stepper { display: flex; align-items: center; gap: 6px; }
+.stepper .btn { min-width: 44px; min-height: 40px; padding: 0; font-size: 20px; }
+.stepper-n { width: 60px; text-align: center; min-height: 40px; padding: 0 4px; }

@@ -417,9 +417,17 @@ def main():
         page.wait_for_function("() => window.__mk.S.layers.rain && !window.__mk.S.rainLoading", timeout=30000)
         page.click("#sheetClose")
 
-        # Havainnot ja saalis
+        # Havainnot ja saalis: lomake aukeaa ylhäältä, vaikka edellinen paneeli olisi vieritetty alas
+        page.click("#settingsBtn")
+        page.evaluate("document.getElementById('sheetBody').scrollTop = 99999")
+        page.click("#sheetClose")
         page.click("#obsBtn")
         page.wait_for_selector("text=Oma sijainti (±")
+        form = page.evaluate("""() => { const b = document.getElementById('sheetBody');
+          return { top: b.scrollTop, fits: b.scrollHeight <= b.clientHeight + 4, h: b.scrollHeight, ch: b.clientHeight }; }""")
+        print("LOMAKE:", form)
+        assert form["top"] == 0 and form["fits"], form
+        page.screenshot(path=str(SHOTS / "25-lomake.png"))
         page.click("#sheetBody button:has-text('Teeri')")
         page.click("#sheetBody button:has-text('Saalis')")
         page.click("#sheetBody button:has-text('Koiras')")
@@ -435,6 +443,7 @@ def main():
         page.wait_for_selector("#sheet", state="hidden")
         page.mouse.click(120, 330)
         page.wait_for_selector("text=Kartalta valittu kohta")
+        assert page.evaluate("document.getElementById('sheetBody').scrollTop") == 0
         page.click("#sheetBody button:has-text('Metso')")
         page.click("#sheetBody button:has-text('Seisonta')")
         page.click("#sheetBody button:has-text('Tallenna')")

@@ -949,12 +949,14 @@
     $('backdrop').hidden = false;
     $('sheet').hidden = false;
     renderSheet();
+    $('sheetBody').scrollTop = 0;
   }
   function renderSheet() {
     if (!currentSheet) return;
     var body = $('sheetBody');
     var scroll = body.scrollTop;
     body.innerHTML = '';
+    body.className = 'sheet-body';
     currentSheet.render(body);
     body.scrollTop = scroll;
   }
@@ -2089,7 +2091,7 @@
       loc: gps ? { lat: S.pos.coords.latitude, lon: S.pos.coords.longitude, acc: S.pos.coords.accuracy, src: 'gps' } : null };
   }
   function segRow(label, list, key) {
-    var seg = h('div', { class: 'seg seg-wrap', role: 'group', 'aria-label': label });
+    var seg = h('div', { class: 'seg seg-compact', role: 'group', 'aria-label': label });
     list.forEach(function (o) {
       seg.appendChild(h('button', { type: 'button', 'aria-pressed': String(S.obsDraft[key] === o[0]), text: o[1],
         onclick: function () { S.obsDraft[key] = o[0]; renderSheet(); } }));
@@ -2098,6 +2100,7 @@
   }
   function renderObsForm(body) {
     var d = S.obsDraft || (S.obsDraft = newDraft());
+    body.classList.add('obs-form');
     var locTxt = d.loc ? (d.loc.src === 'gps' ? 'Oma sijainti' + (isFinite(d.loc.acc) && d.loc.acc !== null ? ' (±' + fmtInt(d.loc.acc) + ' m)' : '') : 'Kartalta valittu kohta') +
       ' · ' + d.loc.lat.toFixed(5).replace('.', ',') + ' N, ' + d.loc.lon.toFixed(5).replace('.', ',') + ' E' : 'Paikkaa ei ole valittu';
     body.appendChild(h('div', { class: 'field' }, h('span', { class: 'label', text: 'Paikka' }), h('div', { class: d.loc ? '' : 'warn-text', text: locTxt }),
@@ -2108,9 +2111,13 @@
           S.pickingObs = true; closeSheet(); toast('Napauta karttaa merkinnän kohdalla.', null, 6000); } }))));
     body.appendChild(segRow('Laji', OBS_SPECIES, 'laji'));
     body.appendChild(segRow('Tyyppi', OBS_TYPES, 'tyyppi'));
-    var n = h('input', { class: 'input', type: 'number', inputmode: 'numeric', min: '1', max: '99', value: String(d.n), 'aria-label': 'Määrä' });
-    n.addEventListener('change', function () { d.n = Math.max(1, Math.min(99, Math.round(Number(n.value) || 1))); n.value = String(d.n); });
-    body.appendChild(h('div', { class: 'field' }, h('span', { class: 'label', text: 'Määrä' }), n));
+    var n = h('input', { class: 'input stepper-n', type: 'number', inputmode: 'numeric', min: '1', max: '99', value: String(d.n), 'aria-label': 'Määrä' });
+    function setN(v) { d.n = Math.max(1, Math.min(99, Math.round(Number(v) || 1))); n.value = String(d.n); }
+    n.addEventListener('change', function () { setN(n.value); });
+    body.appendChild(h('div', { class: 'field field-inline' }, h('span', { class: 'label', text: 'Määrä' }),
+      h('div', { class: 'stepper' },
+        h('button', { type: 'button', class: 'btn', 'aria-label': 'Vähemmän', text: '−', onclick: function () { setN(d.n - 1); } }), n,
+        h('button', { type: 'button', class: 'btn', 'aria-label': 'Enemmän', text: '+', onclick: function () { setN(d.n + 1); } }))));
     body.appendChild(segRow('Sukupuoli', OBS_SEX, 'sp'));
     var note = h('input', { class: 'input', type: 'text', maxlength: '120', value: d.note, placeholder: 'Lisätieto (valinnainen)', 'aria-label': 'Lisätieto' });
     note.addEventListener('input', function () { d.note = note.value.slice(0, 120); });
