@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-18T18:33:20Z",
+ "generated": "2026-10-18T18:43:49Z",
  "encoding": 1,
  "mvmiYear": 2023,
  "attribution": [
@@ -385,70 +385,6 @@
    "declCount": 73,
    "srcHash": "a1155ccc8af3",
    "source": "areas/riikinhovi.json"
-  },
-  {
-   "id": "0000-testialue",
-   "name": "Testialue (Evo, ei virallinen raja)",
-   "areaHa": 3562,
-   "center": [
-    61.237182,
-    25.100735
-   ],
-   "forest": {
-    "width": 418,
-    "height": 452,
-    "res": 33.252,
-    "mercBounds": [
-     2787448.656,
-     8673052.656,
-     2801347.992,
-     8688082.56
-    ],
-    "bounds": [
-     [
-      61.205025,
-      25.040077
-     ],
-     [
-      61.269992,
-      25.164937
-     ]
-    ],
-    "checksum": {
-     "sumR": 7899004,
-     "sumG": 11829982
-    },
-    "file": "data/0000-testialue/forest.png?v=85eb82164823"
-   },
-   "protectedCount": 13,
-   "built": "2026-10-18T17:14:45Z",
-   "version": "85eb82164823",
-   "bytes": 527591,
-   "boundary": "data/0000-testialue/boundary.geojson?v=85eb82164823",
-   "protected": "data/0000-testialue/protected.geojson?v=85eb82164823",
-   "habitat": "data/0000-testialue/habitat.png?v=85eb82164823",
-   "habitatHa": {
-    "metso": [
-     675,
-     257
-    ],
-    "teeri": [
-     231,
-     99
-    ],
-    "pyy": [
-     585,
-     181
-    ]
-   },
-   "cuts": "data/0000-testialue/cuts.geojson?v=85eb82164823",
-   "cutsCount": 15,
-   "declCount": 17,
-   "chmYears": [
-    2025
-   ],
-   "srcHash": "9fabaae3354f",
-   "source": "areas/0000-testialue.geojson"
   }
  ]
 }
