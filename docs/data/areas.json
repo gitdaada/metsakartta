@@ -1,5 +1,5 @@
 {
- "generated": "2026-10-18T18:43:49Z",
+ "generated": "2026-10-20T14:18:18Z",
  "encoding": 1,
  "mvmiYear": 2023,
  "attribution": [
@@ -8,6 +8,70 @@
   "Uudet hakkuut: Suomen metsäkeskus, latvusmalli ja metsänkäyttöilmoitukset (CC BY 4.0)"
  ],
  "areas": [
+  {
+   "id": "ita-suomussalmi",
+   "name": "Itä Suomussalmi",
+   "areaHa": 229883,
+   "center": [
+    64.819586,
+    29.442841
+   ],
+   "forest": {
+    "width": 3965,
+    "height": 4826,
+    "res": 37.689,
+    "mercBounds": [
+     3199984.545,
+     9485266.008,
+     3349421.43,
+     9667153.122
+    ],
+    "bounds": [
+     [
+      64.52853,
+      28.74595
+     ],
+     [
+      65.222231,
+      30.088365
+     ]
+    ],
+    "checksum": {
+     "sumR": 481937087,
+     "sumG": 397721305
+    },
+    "file": "data/ita-suomussalmi/forest.png?v=f30aabb3721d"
+   },
+   "protectedCount": 37,
+   "built": "2026-10-20T14:05:43Z",
+   "version": "f30aabb3721d",
+   "bytes": 27912912,
+   "boundary": "data/ita-suomussalmi/boundary.geojson?v=f30aabb3721d",
+   "protected": "data/ita-suomussalmi/protected.geojson?v=f30aabb3721d",
+   "habitat": "data/ita-suomussalmi/habitat.png?v=f30aabb3721d",
+   "habitatHa": {
+    "metso": [
+     29548,
+     12229
+    ],
+    "teeri": [
+     78330,
+     10102
+    ],
+    "pyy": [
+     1880,
+     188
+    ]
+   },
+   "cuts": "data/ita-suomussalmi/cuts.geojson?v=f30aabb3721d",
+   "cutsCount": 283,
+   "declCount": 2068,
+   "chmYears": [
+    2024
+   ],
+   "srcHash": "9e01745faf47",
+   "source": "areas/Itä-suomussalmi.json"
+  },
   {
    "id": "jahti",
    "name": "Jahti",
