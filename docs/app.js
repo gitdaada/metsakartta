@@ -121,18 +121,15 @@
   // Kartta
   // ---------------------------------------------------------------------------
 
-  // Kartan voi kääntää kahdella sormella (leaflet-rotate). Pohjoinen palautetaan kompassipainikkeesta.
-  var CAN_ROTATE = typeof L.Map.prototype.setBearing === 'function';
-  var map = L.map('map', { zoomControl: false, maxZoom: 18, minZoom: 4, attributionControl: true, zoomSnap: 0.5,
-    rotate: CAN_ROTATE, touchRotate: CAN_ROTATE, shiftKeyRotate: CAN_ROTATE, rotateControl: false, compassBearing: false, bearing: 0 });
+  // Kartan voi kääntää kahdella sormella (rotate.js). Pohjoinen palautetaan kompassipainikkeesta.
+  var CAN_ROTATE = !!window.MKRotate;
+  if (CAN_ROTATE) MKRotate.layout($('map'), $('mapView'));
+  var map = L.map('mapView', { zoomControl: false, maxZoom: 18, minZoom: 4, attributionControl: true, zoomSnap: 0.5 });
   map.attributionControl.setPrefix(false);
   map.setView(store.get('view', { c: [64.0, 26.5], z: 5 }).c, store.get('view', { c: [64.0, 26.5], z: 5 }).z);
-  function bearing() { return CAN_ROTATE && map.getBearing ? map.getBearing() || 0 : 0; }
-  // Omat tasot kääntyvät kartan mukana (rotatePane); tuuliviuhka piirretään näytön koordinaateissa.
-  function makePane(name, z, fixed) {
-    var parent = CAN_ROTATE ? map.getPane(fixed ? 'norotatePane' : 'rotatePane') : undefined;
-    map.createPane(name, parent).style.zIndex = z;
-  }
+  var rot = CAN_ROTATE ? MKRotate.install(map, $('map'), { threshold: 12 }) : null;
+  function bearing() { return rot ? rot.getBearing() : 0; }
+  function makePane(name, z) { map.createPane(name).style.zIndex = z; }
   makePane('maskPane', 300);
   makePane('forestPane', 350);
   makePane('habitatPane', 360);
@@ -141,7 +138,7 @@
   makePane('protPane', 420);
   makePane('boundaryPane', 430);
   makePane('rainPane', 380);
-  makePane('windPane', 435, true);
+  makePane('windPane', 435);
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
 
   map.on('moveend', function () {
@@ -455,7 +452,8 @@
   }
 
   function fitArea(a) {
-    map.fitBounds(a.forest.bounds, { paddingTopLeft: [16, 84], paddingBottomRight: [76, legendOpen ? 240 : 64] });
+    var fit = { paddingTopLeft: [16, 84], paddingBottomRight: [76, legendOpen ? 240 : 64] };
+    if (rot) rot.fitBounds(a.forest.bounds, fit); else map.fitBounds(a.forest.bounds, fit);
   }
 
   function selectArea(id, opts) {
@@ -661,46 +659,8 @@
     map.on('rotate', function () {
       updateCompass();
       updateWindUi();
-      if (S.layers.me && S.pos) S.layers.me.setIcon(meIcon(S.heading));
     });
-    installRotateThreshold(12);
-  }
-
-  // Kahden sormen nipistys kääntäisi karttaa herkästi myös zoomatessa. Kääntö alkaa vasta,
-  // kun sormia on kierretty kynnyskulman verran, ja jatkuu siitä ilman nykäystä.
-  function installRotateThreshold(deg) {
-    var tg = map.touchGestures;
-    if (!tg || typeof tg._onTouchStart !== 'function' || typeof tg._onTouchMove !== 'function') return;
-    // Kosketuksen kuuntelija on rekisteröity jo kartan luonnissa: vaihdetaan se uuteen.
-    var wasOn = tg.enabled();
-    if (wasOn) tg.disable();
-    var start = tg._onTouchStart, move = tg._onTouchMove;
-    function angle(e) {
-      var p1 = map.mouseEventToContainerPoint(e.touches[0]), p2 = map.mouseEventToContainerPoint(e.touches[1]);
-      return { a: Math.atan2(p1.y - p2.y, p1.x - p2.x) * 180 / Math.PI, v: p1.subtract(p2) };
-    }
-    tg._onTouchStart = function (e) {
-      var r = start.apply(this, arguments);
-      if (e.touches && e.touches.length === 2) { this._mkA0 = angle(e).a; this._mkFree = false; }
-      return r;
-    };
-    tg._onTouchMove = function (e) {
-      if (this.rotate && this._rotating && !this._mkFree && e.touches && e.touches.length === 2) {
-        var g = angle(e), d = ((g.a - this._mkA0) % 360 + 540) % 360 - 180;
-        if (Math.abs(d) < deg) {
-          this._rotating = false;
-          try { return move.apply(this, arguments); } finally { this._rotating = true; }
-        }
-        // Kynnys ylitetty: aloitetaan kääntö tästä asennosta (sama laskenta kuin laajennuksessa).
-        this._mkFree = true;
-        onManualRotate();
-        this._startTheta = Math.atan(g.v.x / g.v.y);
-        this._startBearing = map.getBearing();
-        if (g.v.y < 0) this._startBearing += 180;
-      }
-      return move.apply(this, arguments);
-    };
-    if (wasOn) tg.enable();
+    map.on('rotatestart', onManualRotate);
   }
 
   // ---------------------------------------------------------------------------
@@ -709,7 +669,7 @@
 
   function meIcon(heading) {
     var arrow = (heading === null || heading === undefined || isNaN(heading)) ? '' :
-      '<div class="me-arrow" style="transform:rotate(' + Math.round(heading + bearing()) + 'deg)"></div>';
+      '<div class="me-arrow" style="transform:rotate(' + Math.round(heading) + 'deg)"></div>';
     return L.divIcon({ className: 'me-marker', html: arrow + '<div class="me-dot"></div>', iconSize: [0, 0] });
   }
 
@@ -1386,16 +1346,18 @@
     _draw: function (now) {
       var map = this._map, c = this._canvas, f = this._fan;
       if (!map || !c || this._hidden) return;
-      var size = map.getSize(), dpr = Math.min(window.devicePixelRatio || 1, 2);
-      if (c.width !== Math.round(size.x * dpr) || c.height !== Math.round(size.y * dpr)) {
-        c.width = Math.round(size.x * dpr); c.height = Math.round(size.y * dpr);
-        c.style.width = size.x + 'px'; c.style.height = size.y + 'px';
+      // Kangas kattaa vain näkyvän alueen (kartan koordinaateissa) ja kääntyy kartan mukana.
+      var sz = map.getSize(), vr = rot ? rot.visibleRect() : { x: 0, y: 0, w: sz.x, h: sz.y };
+      var dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (c.width !== Math.round(vr.w * dpr) || c.height !== Math.round(vr.h * dpr)) {
+        c.width = Math.round(vr.w * dpr); c.height = Math.round(vr.h * dpr);
+        c.style.width = vr.w + 'px'; c.style.height = vr.h + 'px';
       }
-      // Kangas peittää näkymän: sijoitetaan kääntymättömään tasoon näytön vasempaan yläkulmaan.
-      L.DomUtil.setPosition(c, CAN_ROTATE ? L.point(0, 0).subtract(map._getMapPanePos()) : map.containerPointToLayerPoint([0, 0]));
+      this._origin = L.point(vr.x, vr.y);
+      L.DomUtil.setPosition(c, map.containerPointToLayerPoint(this._origin));
       var ctx = c.getContext('2d');
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, size.x, size.y);
+      ctx.setTransform(dpr, 0, 0, dpr, -vr.x * dpr, -vr.y * dpr);
+      ctx.clearRect(vr.x, vr.y, vr.w, vr.h);
       if (!f) return;
       var o = map.latLngToContainerPoint([f.lat, f.lon]);
       var e = map.latLngToContainerPoint(MK.destPoint(f.lat, f.lon, f.bearing, f.len));
@@ -2249,7 +2211,7 @@
   updateScent();
   setInterval(function () { updateSun(); updateScent(); }, 30000);
 
-  window.__mk = { S: S, settings: settings, map: map, selectArea: selectArea, offline: function () { return offline; },
+  window.__mk = { S: S, settings: settings, map: map, rot: rot, selectArea: selectArea, offline: function () { return offline; },
     refreshWind: refreshWind, currentWind: currentWind, refreshRain: refreshRain,
     obs: function () { return obsList; }, onOrientation: onOrientation, startCompass: startCompass, updateSun: updateSun,
     loadIndex: loadIndex, checkNewAreas: checkNewAreas };

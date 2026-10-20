@@ -84,15 +84,24 @@ Tiedot päivittyvät viikoittain maanantaiaamuisin. Tason saa piiloon *Karttatas
 - Sade-ennuste: MET Norway, Nowcast 2.0 (CC BY 4.0). Ennuste perustuu sadetutkahavaintoihin.
 - Uudet hakkuut: Suomen metsäkeskus, latvusmalli ja metsänkäyttöilmoitukset (CC BY 4.0).
 - Pohjakartta: Maanmittauslaitos, CC BY 4.0 (tai OpenStreetMap ilman API-avainta, vain verkossa).
-- Kirjastot: Leaflet 1.9.4 (BSD-2) ja leaflet-rotate 0.2.8 (GPL-3.0, kartan kääntö).
+- Kirjasto: Leaflet 1.9.4 (BSD 2-Clause). Kartan kääntö on sovelluksen omaa koodia (`docs/rotate.js`).
 
 MVMI on satelliittikuviin ja koealoihin perustuva arvio. Yksittäisen ruudun arvo voi poiketa todellisuudesta, mutta laajempien kuvioiden yleiskuva on luotettavampi. Aineisto kuvaa tilannetta vuonna 2023, joten sen jälkeiset hakkuut eivät näy. Ne erottuvat vaihtamalla pohjaksi ilmakuvan.
 
 ## Lisenssi
 
-Sovelluksen koodi on lisensoitu GNU GPL v3 -lisenssillä ([LICENSE](LICENSE)). Koodia saa käyttää, muuttaa ja jakaa, kunhan muutettu versio jaetaan samoilla ehdoilla lähdekoodin kanssa. Kartan kääntöön käytettävä leaflet-rotate on samalla lisenssillä, Leaflet BSD-2-lisenssillä.
+Sovellus ja sen lähdekoodi ovat julkisesti nähtävillä, mutta niitä ei saa käyttää kaupallisesti ilman tekijän lupaa.
 
-Karttadata (`docs/data/`) on johdettu avoimista aineistoista. Niiden lisenssit (CC BY 4.0) on lueteltu kohdassa *Tietolähteet ja lisenssit*.
+- Sovelluksen koodi on lisensoitu [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) -lisenssillä ([LICENSE](LICENSE)). Sovellusta saa käyttää, muokata ja jakaa ei-kaupallisiin tarkoituksiin, esimerkiksi omaan käyttöön, harrastuksiin, opiskeluun ja tutkimukseen.
+- Kaupallinen käyttö edellyttää tekijän (GitHub-käyttäjä [gitdaada](https://github.com/gitdaada)) etukäteen antamaa kirjallista lupaa. Kaupallista käyttöä on esimerkiksi:
+  - sovelluksen tai siitä muokatun version julkaiseminen sovelluskaupassa (esim. App Store tai Google Play) tai muuten maksullisena, mainosrahoitteisena tai tilauspohjaisena
+  - sovelluksen tai sen osien käyttäminen osana kaupallista tuotetta tai palvelua
+  - sovelluksen myyminen tai lisensoiminen eteenpäin.
+- Luvasta, sen ehdoista ja mahdollisesta rojaltijaosta sovitaan tapauskohtaisesti erikseen kirjallisesti.
+- Kopioissa ja muokatuissa versioissa on säilytettävä LICENSE-tiedosto ja sen alussa oleva `Required Notice` -rivi.
+- Poikkeus: `docs/vendor/leaflet/` on Leaflet-kirjasto, jota koskee sen oma BSD 2-Clause -lisenssi ([docs/vendor/leaflet/LICENSE](docs/vendor/leaflet/LICENSE)).
+
+Karttadata (`docs/data/`) on johdettu avoimista aineistoista. Alkuperäisten aineistojen lisenssit (CC BY 4.0) on lueteltu kohdassa *Tietolähteet ja lisenssit*.
 
 ## Tietosuoja
 

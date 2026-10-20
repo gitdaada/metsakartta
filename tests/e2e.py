@@ -155,6 +155,9 @@ def main():
         page.evaluate("navigator.serviceWorker.ready")
         page.wait_for_timeout(1500)
         page.screenshot(path=str(SHOTS / "01-kartta.png"))
+        # Karttatasot pysyvät painikkeiden ja tekijätietojen alla (oma pinoamistaso).
+        assert page.evaluate("getComputedStyle(document.getElementById('mapView')).zIndex") == "0"
+        assert page.is_visible(".leaflet-control-attribution") and page.is_visible(".leaflet-control-scale")
 
         # Napautus vanhaan metsään
         pt = page.evaluate("""() => {
@@ -167,7 +170,7 @@ def main():
               const ll = MK.mercToLonLat(mx, my);
               const ll2 = L.latLng(ll[1], ll[0]);
               if (!b.contains(ll2)) continue;
-              const p = map.latLngToContainerPoint(ll2);
+              const p = window.__mk.rot.latLngToScreen(ll2);
               if (p.y < 140 || p.y > 560 || p.x < 30 || p.x > 300) continue;
               return {x: p.x, y: p.y, age: c-2};
             }
@@ -186,7 +189,7 @@ def main():
         page.click(".info-close")
 
         # Suojelualueen napautus
-        sp = page.evaluate("""() => { const p = window.__mk.map.latLngToContainerPoint([61.249, 25.138]); return {x:p.x, y:p.y}; }""")
+        sp = page.evaluate("""() => { const p = window.__mk.rot.latLngToScreen([61.249, 25.138]); return {x:p.x, y:p.y}; }""")
         page.mouse.click(sp["x"], sp["y"])
         page.wait_for_selector("#infoCard:not([hidden])")
         info2 = page.inner_text("#infoCard")
@@ -202,7 +205,7 @@ def main():
         assert page.evaluate("window.__mk.S.cutsGJ.features.length") == 3
         page.evaluate("window.__mk.map.setView([61.224, 25.072], 15, {animate: false})")
         page.wait_for_timeout(500)
-        cp = page.evaluate("() => { const p = window.__mk.map.latLngToContainerPoint([61.224, 25.072]); return {x:p.x, y:p.y}; }")
+        cp = page.evaluate("() => { const p = window.__mk.rot.latLngToScreen([61.224, 25.072]); return {x:p.x, y:p.y}; }")
         page.mouse.click(cp["x"], cp["y"])
         page.wait_for_selector("#infoCard:not([hidden])")
         cinfo = page.inner_text("#infoCard")
@@ -214,7 +217,7 @@ def main():
         page.click(".info-close")
         page.evaluate("window.__mk.map.setView([61.2245, 25.134], 15, {animate: false})")
         page.wait_for_timeout(400)
-        dp = page.evaluate("() => { const p = window.__mk.map.latLngToContainerPoint([61.2245, 25.134]); return {x:p.x, y:p.y}; }")
+        dp = page.evaluate("() => { const p = window.__mk.rot.latLngToScreen([61.2245, 25.134]); return {x:p.x, y:p.y}; }")
         page.mouse.click(dp["x"], dp["y"])
         page.wait_for_selector("#infoCard:not([hidden])")
         dinfo = page.inner_text("#infoCard")
@@ -254,8 +257,8 @@ def main():
         page.wait_for_timeout(600)
         fan = page.evaluate("""() => {
           const lay = window.__mk.S.layers.wind, f = lay._fan, map = window.__mk.map, c = lay._canvas;
-          const dpr = c.width / map.getSize().x, ctx = c.getContext('2d');
-          const alphaAt = (b, d) => { const ll = MK.destPoint(f.lat, f.lon, b, d); const p = map.latLngToContainerPoint(ll);
+          const dpr = c.width / parseFloat(c.style.width), ctx = c.getContext('2d');
+          const alphaAt = (b, d) => { const ll = MK.destPoint(f.lat, f.lon, b, d); const p = map.latLngToContainerPoint(ll).subtract(lay._origin);
             return ctx.getImageData(Math.round(p.x*dpr), Math.round(p.y*dpr), 1, 1).data[3]; };
           return { bearing: f.bearing, half: f.half, down25: alphaAt(f.bearing, f.len*0.25), down60: alphaAt(f.bearing, f.len*0.6),
                    up: alphaAt(f.bearing + 180, f.len*0.3), side: alphaAt(f.bearing + 90, f.len*0.3) };
@@ -312,22 +315,70 @@ def main():
         assert page.get_attribute("#compassBtn", "aria-label") == "Käännä pohjoinen ylös"
         fan2 = page.evaluate("""() => {
           const lay = window.__mk.S.layers.wind, f = lay._fan, map = window.__mk.map, c = lay._canvas;
-          const dpr = c.width / map.getSize().x, ctx = c.getContext('2d');
-          const alphaAt = (b, d) => { const ll = MK.destPoint(f.lat, f.lon, b, d); const p = map.latLngToContainerPoint(ll);
+          const dpr = c.width / parseFloat(c.style.width), ctx = c.getContext('2d');
+          const alphaAt = (b, d) => { const ll = MK.destPoint(f.lat, f.lon, b, d); const p = map.latLngToContainerPoint(ll).subtract(lay._origin);
             return ctx.getImageData(Math.round(p.x*dpr), Math.round(p.y*dpr), 1, 1).data[3]; };
           return { down25: alphaAt(f.bearing, f.len*0.25), up: alphaAt(f.bearing + 180, f.len*0.3) };
         }""")
         print("VIUHKA KÄÄNNETYSSÄ:", fan2)
         assert fan2["down25"] > 0 and fan2["up"] == 0, fan2
         # Napautus osuu oikeaan paikkaan käännetyllä kartalla
-        tgt = page.evaluate("() => { const ll = window.__mk.map.containerPointToLatLng([150, 300]); return [ll.lat, ll.lng]; }")
+        tgt = page.evaluate("() => { const ll = window.__mk.rot.screenToLatLng([150, 300]); return [ll.lat, ll.lng]; }")
         page.mouse.click(150, 300)
         page.wait_for_selector("#infoCard:not([hidden])")
         coord = page.inner_text("#infoCard .info-meta")
         print("NAPAUTUS KÄÄNNETYSSÄ:", coord.split("\n")[0], "odotettu", round(tgt[0], 5), round(tgt[1], 5))
         assert f"{tgt[0]:.5f}".replace(".", ",") in coord, (coord, tgt)
+        tm = page.evaluate("() => { const r = document.querySelector('.tap-marker').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; }")
+        print("NAPAUTUSMERKKI NÄYTÖLLÄ:", [round(v, 1) for v in tm])
+        assert abs(tm[0] - 150) < 2 and abs(tm[1] - 300) < 2, tm
+        # Karttatiilet peittävät käännetyn näkymän kulmat
+        page.wait_for_timeout(600)
+        corners = page.evaluate("""() => { const m = window.__mk.map, rot = window.__mk.rot, lay = window.__mk.S.base, z = lay._tileZoom, ts = lay.getTileSize();
+          return [[2,2],[388,2],[2,842],[388,842],[195,2],[2,422]].map(([x,y]) => {
+            const t = m.project(rot.screenToLatLng([x, y]), z).unscaleBy(ts).floor(), tile = lay._tiles[t.x + ':' + t.y + ':' + z];
+            return !!(tile && tile.loaded); }); }""")
+        print("KULMAT PEITETTY:", corners)
+        assert all(corners), corners
         page.screenshot(path=str(SHOTS / "19-kaannetty.png"))
         page.click(".info-close")
+        # Yhden sormen siirto käännetyllä kartalla: sormen alla ollut kohta seuraa sormea.
+        page.evaluate("""() => { const ll = window.__mk.rot.screenToLatLng([195, 500]);
+          window.__probe = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div id="probe" style="width:2px;height:2px;margin:-1px"></div>', iconSize: [0, 0] }), interactive: false }).addTo(window.__mk.map); }""")
+        probe = lambda: page.evaluate("() => { const r = document.getElementById('probe').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; }")
+        p0 = probe()
+        page.mouse.move(195, 500)
+        page.mouse.down()
+        for i in range(1, 11):
+            page.mouse.move(195 + 6 * i, 500 + 6 * i)
+            page.wait_for_timeout(16)
+        page.wait_for_timeout(250)
+        page.mouse.up()
+        page.wait_for_timeout(300)
+        p1 = probe()
+        print("SIIRTO KÄÄNNETYSSÄ: ennen", [round(v, 1) for v in p0], "jälkeen", [round(v, 1) for v in p1], "odotettu [255, 560]")
+        assert abs(p0[0] - 195) < 2 and abs(p0[1] - 500) < 2, p0
+        assert abs(p1[0] - 255) < 3 and abs(p1[1] - 560) < 3, p1
+        # Nipistyszoomaus käännetyllä kartalla: sormien välinen kohta pysyy paikallaan, suunta ei muutu.
+        def pinch(cx, cy, r0, r1, ang=30, steps=10):
+            import math as _m
+            ca, sa = _m.cos(_m.radians(ang)), _m.sin(_m.radians(ang))
+            pts = lambda r: [{"x": cx + r * ca, "y": cy + r * sa, "id": 1}, {"x": cx - r * ca, "y": cy - r * sa, "id": 2}]
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": pts(r0)})
+            for i in range(1, steps + 1):
+                cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": pts(r0 + (r1 - r0) * i / steps)})
+                page.wait_for_timeout(16)
+            cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+            page.wait_for_timeout(700)
+        page.evaluate("() => { window.__mk.map.removeLayer(window.__probe); window.__probe = L.marker(window.__mk.rot.screenToLatLng([230, 470]), { icon: L.divIcon({ className: '', html: '<div id=\"probe\" style=\"width:2px;height:2px;margin:-1px\"></div>', iconSize: [0, 0] }), interactive: false }).addTo(window.__mk.map); }")
+        z0, br0 = page.evaluate("[window.__mk.map.getZoom(), window.__mk.map.getBearing()]")
+        pinch(230, 470, 50, 100)
+        z1, br1 = page.evaluate("[window.__mk.map.getZoom(), window.__mk.map.getBearing()]")
+        p2 = probe()
+        print("NIPISTYS KÄÄNNETYSSÄ: zoom", z0, "->", z1, "suunta", round(br0, 1), "->", round(br1, 1), "kohta", [round(v, 1) for v in p2])
+        assert abs((z1 - z0) - 1) < 0.01 and abs(br1 - br0) < 0.01, (z0, z1, br0, br1)
+        assert abs(p2[0] - 230) < 6 and abs(p2[1] - 470) < 6, p2
+        page.evaluate("window.__mk.map.removeLayer(window.__probe)")
         page.click("#compassBtn")
         page.wait_for_timeout(300)
         assert abs(page.evaluate("window.__mk.map.getBearing()")) < 0.5
@@ -346,6 +397,28 @@ def main():
         page.click("#compassBtn")
         page.wait_for_timeout(200)
         assert abs(page.evaluate("window.__mk.map.getBearing()")) < 0.5
+        # Puhelimen kääntö vaakatasoon käännetyllä kartalla: keskipiste säilyy, kulmat peittyvät, napautus osuu.
+        page.evaluate("window.__mk.map.setBearing(30)")
+        c0 = page.evaluate("() => { const c = window.__mk.map.getCenter(); return [c.lat, c.lng]; }")
+        page.set_viewport_size({"width": 844, "height": 390})
+        page.wait_for_timeout(900)
+        land = page.evaluate("""() => { const m = window.__mk.map, rot = window.__mk.rot, lay = window.__mk.S.base, z = lay._tileZoom, ts = lay.getTileSize();
+          const el = document.getElementById('mapView'), c = m.getCenter(), ctr = rot.latLngToScreen(c);
+          const cov = [[2,2],[842,2],[2,388],[842,388]].map(([x,y]) => { const t = m.project(rot.screenToLatLng([x, y]), z).unscaleBy(ts).floor(), tile = lay._tiles[t.x + ':' + t.y + ':' + z]; return !!(tile && tile.loaded); });
+          return { w: el.offsetWidth, h: el.offsetHeight, c: [c.lat, c.lng], ctr: [ctr.x, ctr.y], cov: cov }; }""")
+        print("VAAKA:", land)
+        assert land["w"] >= 920 and land["h"] >= 920 and all(land["cov"]), land
+        assert abs(land["c"][0] - c0[0]) < 1e-5 and abs(land["c"][1] - c0[1]) < 1e-5, (land, c0)
+        assert abs(land["ctr"][0] - 422) < 1 and abs(land["ctr"][1] - 195) < 1, land
+        page.mouse.click(300, 160)
+        page.wait_for_selector("#infoCard:not([hidden])")
+        tm = page.evaluate("() => { const r = document.querySelector('.tap-marker').getBoundingClientRect(); return [r.left + r.width/2, r.top + r.height/2]; }")
+        assert abs(tm[0] - 300) < 2 and abs(tm[1] - 160) < 2, tm
+        page.screenshot(path=str(SHOTS / "21-vaaka.png"))
+        page.click(".info-close")
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(600)
+        page.evaluate("window.__mk.map.setBearing(0)")
         page.click("#windBtn")
         page.wait_for_selector(".wind-now")
         wtxt = page.inner_text("#sheetBody")
@@ -476,7 +549,7 @@ def main():
             const i = sy * F.w + sx;
             if (S.hab.metso[i] >= 200) {
               const ll = MK.mercToLonLat(F.mx0 + (sx + 0.5) * F.rx, F.my1 - (sy + 0.5) * F.ry);
-              const p = map.latLngToContainerPoint([ll[1], ll[0]]);
+              const p = window.__mk.rot.latLngToScreen([ll[1], ll[0]]);
               if (b.contains([ll[1], ll[0]]) && p.y > 160 && p.y < 520 && p.x > 90 && p.x < 300) return {x: p.x, y: p.y};
             }
           }

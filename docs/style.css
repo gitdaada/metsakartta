@@ -33,7 +33,13 @@ button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 [hidden] { display: none !important; }
 
-#map { position: fixed; inset: 0; background: #c9d3c6; }
+#map { position: fixed; inset: 0; overflow: hidden; background: #c9d3c6; }
+/* Karttasäiliö on näkymän lävistäjän kokoinen ja kääntyy keskipisteensä ympäri (rotate.js). */
+#mapView { position: absolute; inset: 0; z-index: 0; background: #c9d3c6; } /* oma pinoamistaso: karttatasot eivät nouse painikkeiden päälle */
+/* Painikkeet ja tekijätiedot käännettävän kartan päällä, näkymän reunoilla. */
+.mk-map-ui { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: transparent !important; }
+/* Tekstilliset merkit pysyvät pystyssä, vaikka kartta on käännetty. */
+.mk-rot .obs-pin { transform: rotate(var(--mk-unrot, 0deg)); }
 .leaflet-container { font: inherit; }
 .forest-tile { image-rendering: pixelated; image-rendering: crisp-edges; }
 .leaflet-control-attribution {
