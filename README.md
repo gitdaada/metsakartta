@@ -97,7 +97,7 @@ Sovellus ja sen lähdekoodi ovat julkisesti nähtävillä, mutta niitä ei saa k
   - sovelluksen tai siitä muokatun version julkaiseminen sovelluskaupassa (esim. App Store tai Google Play) tai muuten maksullisena, mainosrahoitteisena tai tilauspohjaisena
   - sovelluksen tai sen osien käyttäminen osana kaupallista tuotetta tai palvelua
   - sovelluksen myyminen tai lisensoiminen eteenpäin.
-- Luvasta, sen ehdoista ja mahdollisesta rojaltijaosta sovitaan tapauskohtaisesti erikseen kirjallisesti.
+- Luvasta, sen ehdoista ja mahdollisesta rojaltijaosta sovitaan tapauskohtaisesti erikseen kirjallisesti. Lupaa voi pyytää avaamalla [issuen](https://github.com/gitdaada/metsakartta/issues).
 - Kopioissa ja muokatuissa versioissa on säilytettävä LICENSE-tiedosto ja sen alussa oleva `Required Notice` -rivi.
 - Poikkeus: `docs/vendor/leaflet/` on Leaflet-kirjasto, jota koskee sen oma BSD 2-Clause -lisenssi ([docs/vendor/leaflet/LICENSE](docs/vendor/leaflet/LICENSE)).
 
